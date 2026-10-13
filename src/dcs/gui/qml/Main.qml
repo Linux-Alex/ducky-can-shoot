@@ -49,6 +49,12 @@ Kirigami.ApplicationWindow {
         padding: 0
         title: ""
 
+        // Kirigami builds a toolbar row for the current page and reserves its
+        // height (48 px with Breeze) even when it has nothing to show: no title,
+        // no actions, no drawer.  This interface brings its own tab bar, so that
+        // row would only be an empty band above it.
+        globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+
         ColumnLayout {
             anchors.fill: parent
             spacing: 0

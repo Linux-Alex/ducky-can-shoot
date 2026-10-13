@@ -37,6 +37,12 @@ change between minor releases; each such change is listed below.
   with the local file, so a truncated transfer fails and is retried instead of
   being published. A regression test uploads several megabytes to a local HTTP
   server and asserts every byte arrives.
+- **No empty band above the navigation.** Kirigami builds a toolbar row for the
+  current page and reserves its height (48 px with the Breeze style) even when
+  the page has no title, no actions and no drawer, so after removing the global
+  drawer an empty strip was left where the hamburger had been. The page now sets
+  Kirigami.ApplicationHeaderStyle.None, and a test asserts that the tab bar
+  starts at the top of the window.
 - **Readable text on a highlighted row.** The removable-media list drew its icon
   in the highlight colour and the mount status in green, both on top of the
   selection colour, which is unreadable with Kubuntu's light blue highlight.

@@ -630,3 +630,51 @@ def test_stage_rows_are_laid_out_without_overlapping(
         assert y + height <= next_y + 1, f"rows overlap: {geometry}"
 
     gui_app.teardown_engine(engine)
+
+def test_no_empty_toolbar_band_above_the_navigation(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """The tab bar must sit at the top of the window.
+
+    Kirigami builds a page toolbar row and reserves its height (48 px with the
+    Breeze style) even when the page has no title, no actions and no drawer, so
+    the interface used to start with an empty band where the hamburger had been.
+    The page sets Kirigami.ApplicationHeaderStyle.None, and this asserts the
+    geometry rather than the property: the navigation starts at the top.
+    """
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtQuick import QQuickItem
+
+    engine, _ = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.setProperty("width", 1280)
+    window.setProperty("height", 900)
+    window.show()
+    for _ in range(60):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    content = window.contentItem()
+    items: list[QQuickItem] = []
+
+    def walk(item: QQuickItem) -> None:
+        items.append(item)
+        for child in item.childItems():
+            walk(child)
+
+    walk(content)
+    tab_bars = [item for item in items if "TabBar" in item.metaObject().className()]
+    assert tab_bars, "the navigation tab bar was not found"
+    top = tab_bars[0].mapToItem(content, QPointF(0, 0)).y()
+    assert top < 12, f"an empty header band is reserved above the navigation (tab bar y={top})"
+
+    # and the toolbar row must not be shown either: Kirigami keeps the item in
+    # the tree, so what matters is that nothing above the navigation is visible
+    toolbar_rows = [
+        item
+        for item in items
+        if "ToolBarPageHeader" in item.metaObject().className() and item.isVisible()
+    ]
+    assert not toolbar_rows, "the page toolbar row is still being shown"
+
+    gui_app.teardown_engine(engine)
