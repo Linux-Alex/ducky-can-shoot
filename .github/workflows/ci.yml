@@ -78,6 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/ruff-action@v4
+      # no moving major tag here: ruff-action's releases are immutable, so the
+      # exact version is the only one that can be resolved
+      - uses: astral-sh/ruff-action@v4.1.0
         with:
           args: check src tests
