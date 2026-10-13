@@ -11,6 +11,7 @@ Controls.ScrollView {
     id: view
 
     signal jobStarted()
+    signal installRequested()
 
     clip: true
     contentWidth: availableWidth
@@ -332,6 +333,11 @@ Controls.ScrollView {
                                + "signature scanner.") : "";
             }
             actions: [
+                Kirigami.Action {
+                    text: "Install ClamAV..."
+                    icon.name: "install"
+                    onTriggered: view.installRequested()
+                },
                 Kirigami.Action {
                     text: "Re-check"
                     icon.name: "view-refresh"

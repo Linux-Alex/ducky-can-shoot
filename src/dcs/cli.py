@@ -33,6 +33,13 @@ from dcs.core.events import (
     StageState,
     severity_rank,
 )
+from dcs.core.installer import (
+    Installer,
+    build_plan,
+    manual_instructions,
+    plan_summary,
+)
+from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import configure_logging, get_logger
 from dcs.core.pipeline import JobRequest, Pipeline
 from dcs.core.scanner import Scanner
@@ -398,8 +405,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             f"engine {status.engine_id}",
             status.available,
             (status.version or "") + (" " if status.version else "") + status.detail,
-            "Install ClamAV (sudo apt install clamav clamav-daemon && sudo freshclam) for "
-            "signature based detection.",
+            "Install it from the interface (Settings, Install ClamAV) or run "
+            "'dcs install-clamav' for signature based detection.",
         )
 
     for tool, hint in (
@@ -507,6 +514,67 @@ def cmd_providers(args: argparse.Namespace) -> int:
     return EXIT_CLEAN
 
 
+def cmd_install_clamav(args: argparse.Namespace) -> int:
+    """Install the optional ClamAV engine through the system package manager.
+
+    The password is collected by sudo/pkexec, never by DCS: this command only
+    writes the plan as a shell script and hands it to the privilege helper.
+    """
+    config = load_config(args.config)
+    prefer = "terminal" if args.terminal else ("sudo" if sys.stdin.isatty() else "auto")
+    plan = build_plan(config=config.scan.clamav, prefer=prefer)
+
+    if args.json and args.dry_run:
+        payload = plan.to_dict()
+        payload["manual"] = manual_instructions(plan)
+        payload["status"] = verify_clamav(config)
+        print(json.dumps(payload, indent=2))
+        return EXIT_CLEAN
+
+    if not plan.steps:
+        print(plan.blocker or "no installation commands are known for this system.", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(plan_summary(plan))
+    print()
+
+    if args.dry_run:
+        print(colour("Nothing was executed (--dry-run).", "yellow"))
+        print()
+        print(plan.script)
+        return EXIT_CLEAN
+
+    if not plan.possible:
+        print(colour(f"Cannot run it automatically: {plan.blocker}", "red"))
+        print()
+        print(manual_instructions(plan))
+        return EXIT_ERROR
+
+    if not args.yes:
+        try:
+            answer = input("Run these commands now? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Nothing was executed. The commands above are ready to copy.")
+            return EXIT_CLEAN
+
+    outcome = Installer(plan).run(on_output=lambda line: print(line, flush=True))
+    print()
+    status = verify_clamav(config)
+    print(status.get("line", ""))
+    if status.get("warning"):
+        print(colour(f"note: {status['warning']}", "yellow"))
+    if outcome.ok:
+        print(colour("ClamAV is installed.", "green"))
+        return EXIT_CLEAN
+    if outcome.cancelled:
+        print(colour("Installation cancelled.", "yellow"))
+        return EXIT_ERROR
+    print(colour(f"Installation failed: {outcome.error}", "red"))
+    return EXIT_ERROR
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"name": APP_NAME, "version": __version__, "license": APP_LICENSE}))
@@ -587,6 +655,20 @@ def build_parser() -> argparse.ArgumentParser:
     providers = subparsers.add_parser("providers", help="list the available upload providers")
     providers.add_argument("--json", action="store_true")
     providers.set_defaults(func=cmd_providers)
+
+    install = subparsers.add_parser(
+        "install-clamav",
+        help="install the optional ClamAV engine with the system package manager",
+    )
+    install.add_argument("--dry-run", action="store_true", help="print the plan and the script only")
+    install.add_argument(
+        "--terminal",
+        action="store_true",
+        help="open a terminal emulator instead of using the password dialog",
+    )
+    install.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    install.add_argument("--json", action="store_true", help="machine readable plan with --dry-run")
+    install.set_defaults(func=cmd_install_clamav)
 
     version = subparsers.add_parser("version", help="print the version")
     version.add_argument("--json", action="store_true")

@@ -136,6 +136,7 @@ Kirigami.ApplicationWindow {
 
                 HomeView {
                     onJobStarted: root.showTab(1)
+                    onInstallRequested: clamavDialog.open()
                 }
                 LiveView {
                     onJobFinished: {
@@ -150,7 +151,9 @@ Kirigami.ApplicationWindow {
                 ResultView {
                     onRunAgain: root.showTab(0)
                 }
-                SettingsView {}
+                SettingsView {
+                    onInstallRequested: clamavDialog.open()
+                }
                 AboutView {}
             }
         }
@@ -217,6 +220,10 @@ Kirigami.ApplicationWindow {
                 ]
             }
         }
+    }
+
+    InstallClamavDialog {
+        id: clamavDialog
     }
 
     Controls.Popup {

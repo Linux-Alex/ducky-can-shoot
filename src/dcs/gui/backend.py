@@ -30,6 +30,8 @@ from dcs.core.device import (
     unmount_device,
 )
 from dcs.core.events import STAGE_ORDER
+from dcs.core.installer import Installer, build_plan, manual_instructions
+from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import get_logger, log_ring
 from dcs.core.pipeline import JobRequest
 from dcs.core.scanner import Scanner
@@ -85,6 +87,9 @@ class Backend(QObject):
     busyChanged = pyqtSignal()
     toast = pyqtSignal(str, str)  # level, message
     testResult = pyqtSignal(str, bool, str)  # what, ok, message
+    installTextChanged = pyqtSignal()
+    installStateChanged = pyqtSignal()
+    installFinished = pyqtSignal(object)
 
     def __init__(
         self,
@@ -114,6 +119,17 @@ class Backend(QObject):
         self._thread: QThread | None = None
         self._worker: PipelineWorker | None = None
         self._runners: list[AsyncRunner] = []
+        self._installer: Installer | None = None
+        self._install_thread: threading.Thread | None = None
+        self._install_lines: list[str] = []
+        self._install_state = "idle"
+        self._install_outcome: dict[str, Any] = {}
+        self._install_dirty = False
+        # one update per 100 ms keeps a fast moving apt log cheap for QML
+        self._install_timer = QTimer(self)
+        self._install_timer.setInterval(100)
+        self._install_timer.timeout.connect(self._flush_install_text)
+        self._install_timer.start()
 
         log_ring().add_listener(self._on_log_record)
         self.refreshDevices()
@@ -611,3 +627,121 @@ class Backend(QObject):
     def openConfig(self) -> None:
         write_default_config(self.config.source_path or None)
         self.openPath(self.config.source_path or str(write_default_config()))
+
+    # ------------------------------------------------------------------
+    # installing the optional ClamAV engine
+    #
+    # The GUI cannot ask for a password itself, so it hands the job to pkexec
+    # (graphical polkit dialog) or to a terminal with sudo inside, and only
+    # streams what those print.  Nothing in this path needs the password.
+    # ------------------------------------------------------------------
+    @pyqtProperty(str, notify=installStateChanged)
+    def installState(self) -> str:
+        return self._install_state
+
+    @pyqtProperty(bool, notify=installStateChanged)
+    def installRunning(self) -> bool:
+        return self._install_state == "running"
+
+    @pyqtProperty(str, notify=installTextChanged)
+    def installText(self) -> str:
+        return "\n".join(self._install_lines)
+
+    @pyqtProperty("QVariantMap", notify=installStateChanged)
+    def installOutcome(self) -> dict[str, Any]:
+        return self._install_outcome
+
+    @pyqtSlot(result="QVariantMap")
+    def clamavInstallPlan(self) -> dict[str, Any]:
+        """What would be run to install ClamAV, for the confirmation dialog."""
+        try:
+            plan = build_plan(config=self.config.scan.clamav)
+        except Exception as exc:
+            log.warning("cannot build an installation plan: %s", exc)
+            return {"possible": False, "blocker": str(exc), "steps": [], "commands": []}
+        data = plan.to_dict()
+        data["manual"] = manual_instructions(plan)
+        data["status"] = verify_clamav(self.config)
+        return data
+
+    @pyqtSlot()
+    def startClamavInstall(self) -> None:
+        """Run the plan in the background, streaming the output to the dialog."""
+        if self._install_state == "running":
+            self.toast.emit("warning", "An installation is already running")
+            return
+        plan = build_plan(config=self.config.scan.clamav)
+        if not plan.possible:
+            self.toast.emit("error", plan.blocker or "nothing to install on this system")
+            self._install_lines = []
+            self._append_install(
+                manual_instructions(plan) if plan.steps else (plan.blocker or "no plan available")
+            )
+            return
+
+        self._install_lines = []
+        self._install_outcome = {}
+        self._append_install(f"# {plan.distro} - {plan.manager.label if plan.manager else ''}")
+        self._append_install(f"# {plan.method_label}")
+        if plan.script_path:
+            self._append_install(f"# script: {plan.script_path}")
+        self._append_install("")
+        self._set_install_state("running")
+
+        installer = Installer(plan)
+        self._installer = installer
+
+        def work() -> None:
+            outcome = installer.run(on_output=self._append_install)
+            outcome_data = outcome.to_dict()
+            outcome_data["verification"] = verify_clamav(self.config)
+            self._install_outcome = outcome_data
+            self._installer = None
+            self._set_install_state("done" if outcome.ok and not outcome.cancelled else "failed")
+            if outcome.ok:
+                self.toast.emit("info", "ClamAV is installed; re-checking the engine")
+            elif outcome.cancelled:
+                self.toast.emit("warning", "Installation cancelled")
+            else:
+                self.toast.emit("error", outcome.error or "the installation did not finish")
+            QTimer.singleShot(0, self.refreshEngineStatus)
+            self.installFinished.emit(outcome_data)
+
+        self._install_thread = threading.Thread(target=work, daemon=True)
+        self._install_thread.start()
+
+    @pyqtSlot()
+    def cancelClamavInstall(self) -> None:
+        if self._installer is not None:
+            self._installer.cancel()
+            self._append_install("")
+            self._append_install("# cancellation requested")
+            self.toast.emit("warning", "Cancelling the installation...")
+
+    @pyqtSlot()
+    def verifyClamav(self) -> None:
+        """Re-probe ClamAV and refresh the engine list in the interface."""
+        self.refreshEngineStatus()
+        status = verify_clamav(self.config)
+        self._append_install("")
+        self._append_install(status.get("line", ""))
+        if status.get("warning"):
+            self._append_install(f"warning: {status['warning']}")
+        self._set_install_state("done" if status.get("available") else self._install_state)
+
+    def _append_install(self, line: str) -> None:
+        self._install_lines.append(line)
+        if len(self._install_lines) > 4000:
+            del self._install_lines[:500]
+        self._install_dirty = True
+
+    def _flush_install_text(self) -> None:
+        if self._install_dirty:
+            self._install_dirty = False
+            self.installTextChanged.emit()
+
+    def _set_install_state(self, state: str) -> None:
+        self._install_state = state
+        self._install_dirty = True
+        self.installStateChanged.emit()
+        self.installTextChanged.emit()

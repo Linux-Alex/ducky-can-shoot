@@ -14,6 +14,8 @@ import org.kde.kirigami as Kirigami
 Controls.ScrollView {
     id: view
 
+    signal installRequested()
+
     clip: true
     contentWidth: availableWidth
 
@@ -265,18 +267,37 @@ Controls.ScrollView {
                 Repeater {
                     model: backend.engineStatus
 
-                    delegate: Controls.Label {
+                    delegate: RowLayout {
                         id: engineLine
                         required property var modelData
 
                         Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        font: Kirigami.Theme.smallFont
-                        opacity: 0.75
-                        color: engineLine.modelData.available ? Kirigami.Theme.textColor
-                                                              : Kirigami.Theme.neutralTextColor
-                        text: (engineLine.modelData.available ? "OK  " : "missing  ")
-                              + engineLine.modelData.label + " - " + engineLine.modelData.detail
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.75
+                            color: engineLine.modelData.available ? Kirigami.Theme.textColor
+                                                                  : Kirigami.Theme.neutralTextColor
+                            text: (engineLine.modelData.available ? "OK  " : "missing  ")
+                                  + engineLine.modelData.label + " - " + engineLine.modelData.detail
+                        }
+
+                        Controls.Button {
+                            visible: !engineLine.modelData.available
+                            text: "Install ClamAV..."
+                            icon.name: "install"
+                            onClicked: view.installRequested()
+                        }
+
+                        Controls.Button {
+                            visible: engineLine.modelData.available
+                            text: "Re-check"
+                            icon.name: "view-refresh"
+                            onClicked: backend.refreshEngineStatus()
+                        }
                     }
                 }
             }

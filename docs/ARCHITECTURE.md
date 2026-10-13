@@ -99,6 +99,7 @@ and even then only through a plain listener callback.
 | `dcs/core/notify/templates.py` | Subject line and the text and HTML bodies. |
 | `dcs/core/report.py` | HTML (self contained), text, findings CSV and JSON writers. |
 | `dcs/core/device.py` | lsblk parsing, removable-media filtering, udisksctl mount/unmount. |
+| `dcs/core/installer.py` | Package-manager detection, the ClamAV installation plan, the generated script and its runner (pkexec, terminal, sudo). |
 | `dcs/core/util.py` | Formatting, the tolerant file walker, hashing, atomic writes, subprocess helpers. |
 | `dcs/core/log.py` | Logging setup plus a ring buffer with listeners, so the GUI can show the tail. |
 | `dcs/gui/backend.py` | The object QML talks to: models, device polling, job control, settings, desktop integration. |
@@ -197,6 +198,44 @@ wrong:
 Because the core has no Qt imports, none of this is required to use it: the CLI
 runs the pipeline on the calling thread, and the tests run it with a
 `CollectingSink`.
+
+## Installing the optional ClamAV engine
+
+ClamAV is optional, and a machine without it only runs the built-in heuristics.
+Installing a package needs root, and a GUI process has no terminal to type a
+password into, so `dcs/core/installer.py` splits the problem in three:
+
+1. **Detection.** `detect_package_manager()` walks a fixed order (apt, dnf,
+   zypper, pacman, apk, xbps, eopkg, emerge, brew) and returns the first
+   manager whose binary exists. `distro_name()` reads `/etc/os-release` for
+   the human readable name. Package names differ per family, so they live in
+   the `PACKAGE_MANAGERS` table rather than in code.
+2. **A plan, never a command.** `build_plan()` produces an `InstallPlan`:
+   the ordered `InstallStep`s (refresh index, install, fetch signatures,
+   enable the service), a rendered shell script, and the privilege method.
+   Nothing is executed at this point, so both the GUI dialog and
+   `dcs install-clamav --dry-run` can show exactly what would run.
+3. **Privilege delegation.** `_argv_for()` turns the plan into one command
+   line: `pkexec /bin/bash <script>` when a polkit agent is running (the
+   graphical password dialog on Plasma), `<terminal> -e bash -c 'sudo ...'`
+   when one is not, plain `sudo bash <script>` for the CLI, or nothing at all
+   when DCS already runs as root.
+
+The generated script is the whole contract with the system: a linear list of
+fixed commands, written with mode 0700 into the cache directory, printed in
+full in the interface. Each step is wrapped in a `step` shell function that
+prints `=== DCS step N: title ===` and `=== DCS step N finished with exit X ===`
+markers, which the runner parses back into per-step outcomes; a failing required
+step exits with `10 * N` so the failure can be attributed without guessing.
+
+The password never enters DCS: polkit or sudo collects it, and the runner only
+streams what those print. Cancellation terminates the whole process group
+(`start_new_session=True` plus `os.killpg`), because killing the shell alone
+would leave a running package manager behind; output is drained on a helper
+thread so a silent step such as `freshclam` stays cancellable.
+
+Afterwards `verify()` re-probes ClamAV through the scanner module, so the
+result page, the log and `dcs engines` all report the same truth.
 
 ## Stage-by-stage flow
 

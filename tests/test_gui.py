@@ -373,7 +373,9 @@ def test_backend_starts_idle_with_providers_and_engines(backend: Backend) -> Non
     assert backend.overallPercent == 0.0
     assert backend.appVersion == __version__
     assert backend.appName == APP_NAME
-    assert backend.sourcePath == ""
+    # the source is empty unless the machine running the suite happens to have a
+    # removable medium plugged in, in which case it is selected automatically
+    assert backend.sourcePath == "" or Path(backend.sourcePath).is_dir()
     assert backend.summary == {}
 
     catalog = provider_catalog()

@@ -379,6 +379,22 @@ Exit code: 0 when every check passed, **1 when at least one check failed**, 2 fo
 an unexpected error. Note that this differs from `scan` and `run`, where 1 means
 "the medium is not clean".
 
+### `dcs install-clamav [--dry-run] [--terminal] [--yes] [--json]`
+
+Installs the optional ClamAV engine through the package manager of the machine
+it runs on. It prints the plan (distribution, package manager, the exact
+commands, the generated script) and asks for confirmation before anything runs;
+sudo collects the password in this terminal, so DCS never handles it.
+
+| Option | Meaning |
+| --- | --- |
+| `--dry-run` | Print the plan, the commands and the generated script; execute nothing. |
+| `--json` | With `--dry-run`: the same plan as JSON, for scripts. |
+| `--terminal` | Open a terminal emulator instead of using the graphical pkexec dialog. |
+| `--yes` | Do not ask for confirmation. |
+
+Exit code 0 when the installation succeeded, 2 when it failed or was cancelled.
+
 ### `dcs config [init|show|path] [--show-secrets]`
 
 | Action | Meaning |
@@ -544,11 +560,33 @@ temporary and expires; anonymous uploads can disappear without notice.
 [FAIL] engine clamav    ClamAV is not installed (install the clamav package, then run freshclam)
 ```
 
-Install it, or accept reduced coverage:
+DCS can install it for you. In the interface, the message on the **New job** tab
+and the engine list in **Settings** both offer an **Install ClamAV...** button:
+it detects your distribution and package manager, shows every command it is
+about to run, and then hands the job to pkexec (a graphical password dialog) or
+to a terminal with sudo inside. DCS never sees your password, and the plan can
+be copied instead of executed.
+
+![The Install ClamAV dialog: detected distribution, package manager, privilege method, the exact commands and the streamed installation output](docs/images/install-clamav.png)
+
+From a terminal the same plan is available as:
 
 ```bash
-sudo apt install clamav clamav-daemon && sudo freshclam   # Debian / Ubuntu
-sudo dnf install clamav clamd clamav-update && sudo freshclam
+dcs install-clamav --dry-run    # print the plan, the script and the commands
+dcs install-clamav              # ask for confirmation, then run it through sudo
+```
+
+The installer knows APT (Debian, Ubuntu, Mint), DNF (Fedora, RHEL, Rocky),
+Zypper (openSUSE), Pacman (Arch), APK (Alpine), XBPS (Void), eopkg (Solus),
+Portage (Gentoo) and Homebrew. It refreshes the package index, installs the
+scanner and the daemon, fetches the signatures (around 300 MB the first time)
+and enables the service. Prefer to do it by hand? These are exactly the commands
+the dialog shows before it runs anything:
+
+```bash
+sudo apt install clamav clamav-daemon clamav-freshclam && sudo freshclam   # Debian / Ubuntu
+sudo dnf install clamav clamd clamav-update && sudo freshclam              # Fedora / RHEL
+sudo pacman -S clamav && sudo freshclam                                    # Arch
 dcs engines
 ```
 

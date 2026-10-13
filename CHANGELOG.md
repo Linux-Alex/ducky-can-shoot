@@ -8,6 +8,30 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
+### Added
+
+- **Install ClamAV from the interface.** When the engine is missing, the New
+  job tab and the Settings page offer an **Install ClamAV...** button. DCS
+  detects the distribution and package manager (APT, DNF, Zypper, Pacman, APK,
+  XBPS, eopkg, Portage, Homebrew), shows every command it will run, writes them
+  to an inspectable script, and hands that script to pkexec (a graphical
+  password dialog), to a terminal with sudo inside, or to plain sudo when it
+  already runs on a terminal. The password is collected by polkit or sudo, never
+  by DCS. The installation output is streamed into the dialog, each step is
+  reported separately, the run can be cancelled, and the engine is re-probed
+  when it finishes.
+- `dcs install-clamav [--dry-run] [--terminal] [--yes] [--json]`, the same plan
+  from the command line, exit code 0 on success and 2 on failure.
+
+### Fixed
+
+- Cancelling an installation (or a job) now stops the whole process group and no
+  longer waits for the next line of output to notice.
+- `config`: a value that cannot be converted to its field type is ignored with a
+  warning instead of being stored as a string, and the TOML writer escapes
+  control characters, so a value containing a newline no longer produces a file
+  that tomllib rejects (which silently reset every setting).
+
 ## [0.1.0] - 2026-01
 
 First release. Everything below is new.
