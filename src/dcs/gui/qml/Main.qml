@@ -50,9 +50,8 @@ Kirigami.ApplicationWindow {
         title: ""
 
         // Kirigami builds a toolbar row for the current page and reserves its
-        // height (48 px with Breeze) even when it has nothing to show: no title,
-        // no actions, no drawer.  This interface brings its own tab bar, so that
-        // row would only be an empty band above it.
+        // height (48 px with Breeze) even when there is no title, no action and
+        // no drawer to show, which left an empty band above the tab bar.
         globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
 
         ColumnLayout {
@@ -121,60 +120,81 @@ Kirigami.ApplicationWindow {
                 }
                 AboutView {}
             }
-        }
-    }
 
-    footer: Kirigami.AbstractApplicationHeader {
-        height: backend.state === "idle" ? 0 : implicitHeight
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: Kirigami.Units.largeSpacing
-            anchors.rightMargin: Kirigami.Units.largeSpacing
-            spacing: Kirigami.Units.largeSpacing
-
-            Kirigami.Icon {
-                source: backend.state === "running" ? "process-working"
-                        : backend.state === "finished" ? "dialog-ok-apply"
-                        : backend.state === "failed" ? "dialog-error" : "dialog-information"
-                implicitWidth: Kirigami.Units.iconSizes.small
-                implicitHeight: Kirigami.Units.iconSizes.small
-            }
-
-            Controls.Label {
-                text: {
-                    if (backend.state === "running") {
-                        return "Working on " + (backend.sourceLabel || "the selected medium");
-                    }
-                    if (backend.state === "finished") {
-                        return "Finished: " + (backend.summary.verdict || "");
-                    }
-                    if (backend.state === "failed") {
-                        return "The job failed";
-                    }
-                    return "Idle";
-                }
-                elide: Text.ElideMiddle
-                Layout.maximumWidth: root.width / 2
-            }
-
-            DcsProgressBar {
+            // The status bar is the last row of this column rather than the
+            // window's footer.  A styled footer container paints its background
+            // at its own implicit height while the window content (which
+            // Kirigami raises above it) covers the rest, so the bar used to be
+            // drawn about two thirds tall: a half visible footer.
+            Rectangle {
+                id: statusBar
+                objectName: "statusBar"
                 Layout.fillWidth: true
+                Layout.preferredHeight: visible ? Kirigami.Units.gridUnit * 2.6 : 0
                 visible: backend.state !== "idle"
-                value: backend.overallPercent
-                indeterminate: backend.state === "running" && backend.overallPercent <= 0.001
-            }
+                color: Kirigami.Theme.alternateBackgroundColor
 
-            Kirigami.ActionToolBar {
-                alignment: Qt.AlignRight
-                actions: [
-                    Kirigami.Action {
-                        text: "Cancel"
-                        icon.name: "process-stop"
-                        visible: backend.state === "running"
-                        onTriggered: cancelDialog.open()
+                Rectangle {
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 1
+                    color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
+                                   Kirigami.Theme.textColor.b, 0.12)
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Kirigami.Units.largeSpacing
+                    anchors.rightMargin: Kirigami.Units.largeSpacing
+                    spacing: Kirigami.Units.largeSpacing
+
+                    Kirigami.Icon {
+                        source: backend.state === "running" ? "process-working"
+                                : backend.state === "finished" ? "dialog-ok-apply"
+                                : backend.state === "failed" ? "dialog-error" : "dialog-information"
+                        implicitWidth: Kirigami.Units.iconSizes.small
+                        implicitHeight: Kirigami.Units.iconSizes.small
                     }
-                ]
+
+                    Controls.Label {
+                        text: {
+                            if (backend.state === "running") {
+                                return "Working on " + (backend.sourceLabel || "the selected medium");
+                            }
+                            if (backend.state === "finished") {
+                                return "Finished: " + (backend.summary.verdict || "");
+                            }
+                            if (backend.state === "failed") {
+                                return "The job failed";
+                            }
+                            return "Idle";
+                        }
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: Kirigami.Units.gridUnit * 8
+                    }
+
+                    DcsProgressBar {
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+                        Layout.maximumWidth: Math.max(Kirigami.Units.gridUnit * 14, root.width * 0.35)
+                        visible: backend.state !== "idle"
+                        value: backend.overallPercent
+                        indeterminate: backend.state === "running" && backend.overallPercent <= 0.001
+                    }
+
+                    Kirigami.ActionToolBar {
+                        alignment: Qt.AlignRight
+                        actions: [
+                            Kirigami.Action {
+                                text: "Cancel"
+                                icon.name: "process-stop"
+                                visible: backend.state === "running"
+                                onTriggered: cancelDialog.open()
+                            }
+                        ]
+                    }
+                }
             }
         }
     }

@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
@@ -35,9 +36,9 @@ from PyQt6.QtGui import QGuiApplication  # noqa: E402
 from PyQt6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PyQt6.QtQuick import QQuickWindow  # noqa: E402
 
+import dcs.core.device as device_module  # noqa: E402
 from dcs.core.config import load_config  # noqa: E402
 from dcs.core.device import BlockDevice  # noqa: E402
-import dcs.core.device as device_module  # noqa: E402
 from dcs.gui.app import find_qml_imports, qml_directory  # noqa: E402
 from dcs.gui.backend import Backend  # noqa: E402
 
@@ -148,6 +149,13 @@ class Shot:
         config.upload.enabled = False
         config.email.enabled = False
         config.gui.switch_to_result = False
+        # The window is created at its final size.  Resizing it after the first
+        # frame makes the grab capture a half laid out window: the footer ends up
+        # drawn at the old height and the rest is filled with the clear colour,
+        # which is how a footer that really is 48 px tall came out "half visible".
+        config.gui.remember_window_size = True
+        config.gui.window_width = WINDOW_WIDTH
+        config.gui.window_height = WINDOW_HEIGHT
 
         backend = Backend(config, poll_devices=False)
         engine = QQmlApplicationEngine()
@@ -159,11 +167,10 @@ class Shot:
         engine.rootContext().setContextProperty("appName", "Ducky Can Shoot")
         engine.load(QUrl.fromLocalFile(os.path.join(qml_directory(), "Main.qml")))
         window = engine.rootObjects()[0]
-        window.setProperty("width", WINDOW_WIDTH)
-        window.setProperty("height", WINDOW_HEIGHT)
         window.show()
-
         self.pump(app, 0.6)
+        assert window.property("width") == WINDOW_WIDTH, f"window width {window.property('width')}"
+        assert window.property("height") == WINDOW_HEIGHT, f"window height {window.property('height')}"
         backend.refreshDevices()
         backend.selectDevice(0)
         self.tab(window, 0)
@@ -250,9 +257,36 @@ class Shot:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
             time.sleep(0.01)
 
-    def shot(self, window: QObject, name: str) -> None:
-        self.pump(QGuiApplication.instance(), 0.4)
+    def shot(self, window: QObject, name: str, *, attempts: int = 4):
+        """Grab the window, and refuse to keep a frame that is not fully rendered.
+
+        QQuickWindow.grabWindow() renders whatever the scene graph has synced: if
+        the layout changed since the previous frame (a tab switch, the footer
+        appearing, a window resize) the first grab can contain a half drawn
+        window.  Grabbing twice and checking that the footer is really inside the
+        image is what keeps a stale frame out of the documentation.
+        """
+        app = QGuiApplication.instance()
         image = QQuickWindow.grabWindow(window)
+        for attempt in range(1, attempts + 1):
+            # The offscreen platform keeps an old copy of the area a widget grew
+            # into, so the status bar comes out about a third of its height unless
+            # the window is repainted: nudging the size by one pixel and back
+            # forces a full repaint.
+            window.setProperty("height", WINDOW_HEIGHT + 1)
+            self.pump(app, 0.25)
+            window.setProperty("height", WINDOW_HEIGHT)
+            self.pump(app, 0.35)
+            image = QQuickWindow.grabWindow(window)
+            if self._frame_is_complete(window, image):
+                break
+            print(f"   retrying {name}: the frame was not painted completely (attempt {attempt})")
+        else:
+            raise SystemExit(
+                f"{name}: the window never rendered completely (the status bar does not reach the "
+                "bottom of the image); refusing to write a half drawn screenshot"
+            )
+
         path = self.output / name
         image.save(str(path))
         colours = {
@@ -261,6 +295,26 @@ class Shot:
             for y in range(0, image.height(), 17)
         }
         print(f"{name}: {image.width()}x{image.height()} colours={len(colours)}")
+        return image
+
+    @staticmethod
+    def _frame_is_complete(window: QObject, image: Any) -> bool:
+        """True when everything the window should show is inside the image."""
+        content = window.contentItem()
+        if image.width() != int(content.width()) or image.height() != int(content.height()):
+            return False
+        status_bar = window.findChild(QObject, "statusBar")
+        if status_bar is None or not status_bar.property("visible"):
+            return True  # nothing at the bottom to check
+        # The status bar is the last row of the page, so its bottom edge has to be
+        # the bottom of the window, and its own colour has to reach that edge.  A
+        # stale frame leaves the window colour there instead.
+        background = image.pixel(4, 4)
+        window_colour = image.pixel(image.width() - 4, image.height() - 4)
+        bottom = image.pixel(image.width() // 2, image.height() - 2)
+        if bottom == background:
+            return False
+        return not (bottom == window_colour and background == window_colour)
 
 
 def main() -> int:

@@ -678,3 +678,47 @@ def test_no_empty_toolbar_band_above_the_navigation(
     assert not toolbar_rows, "the page toolbar row is still being shown"
 
     gui_app.teardown_engine(engine)
+
+def test_status_bar_is_inside_the_page_and_reaches_the_bottom(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """The status bar is the last row of the page, not the window footer.
+
+    Regression test for a footer that came out about two thirds tall: the styled
+    footer container (Kirigami.AbstractApplicationHeader, and a ToolBar with an
+    explicit height) painted its background at its own implicit height while the
+    window content, which Kirigami raises above it, covered the rest.  Keeping
+    the bar inside the page removes the whole class of problem.
+    """
+    from PyQt6.QtCore import QObject, QPointF
+    from PyQt6.QtQuick import QQuickItem
+
+    engine, _ = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.show()
+    for _ in range(40):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    # an item in the footer slot would mean the bar is back where the style
+    # paints it wrong; a null property comes back as a voidptr, not None
+    footer = window.property("footer")
+    assert not isinstance(footer, QQuickItem), "the window footer slot is used again"
+
+    status_bar = window.findChild(QObject, "statusBar")
+    assert status_bar is not None, "the status bar was not found"
+    # the bar only exists while a job runs or just after it; the layout is only
+    # meaningful in that state
+    backend._state = "running"
+    backend.stateChanged.emit()
+    for _ in range(30):
+        qapp.processEvents()
+        time.sleep(0.01)
+    content = window.contentItem()
+    top = status_bar.mapToItem(content, QPointF(0, 0)).y()
+    assert top + status_bar.height() == pytest.approx(content.height(), abs=1.5), (
+        f"the status bar ends at {top + status_bar.height():.1f} instead of the bottom "
+        f"of the window ({content.height():.1f})"
+    )
+
+    gui_app.teardown_engine(engine)

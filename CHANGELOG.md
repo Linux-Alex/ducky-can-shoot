@@ -51,6 +51,16 @@ change between minor releases; each such change is listed below.
   with the local file, so a truncated transfer fails and is retried instead of
   being published. A regression test uploads several megabytes to a local HTTP
   server and asserts every byte arrives.
+- **The status bar is no longer drawn two thirds tall.** The window footer slot
+  is filled by a styled container (Kirigami.AbstractApplicationHeader, and a
+  ToolBar with an explicit height too), which paints its background at its own
+  implicit height while the window content, raised above it by Kirigami, covers
+  the rest: screenshots showed a bar cut off after about eighteen of its
+  forty-seven pixels. The bar is now the last row of the page layout, where it
+  is exactly as tall as it says it is and always reaches the bottom edge.
+  scripts/make-screenshots.py also nudges the window by one pixel before every
+  grab, because the offscreen platform otherwise reuses a stale region, and it
+  refuses to write an image whose status bar does not reach the bottom.
 - **No empty band above the navigation.** Kirigami builds a toolbar row for the
   current page and reserves its height (48 px with the Breeze style) even when
   the page has no title, no actions and no drawer, so after removing the global
