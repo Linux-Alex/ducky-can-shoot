@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/linux-alex/ducky-can-shoot/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue. See SECURITY.md.
+  - name: Troubleshooting guide
+    url: https://github.com/linux-alex/ducky-can-shoot/blob/main/docs/TROUBLESHOOTING.md
+    about: ClamAV missing, clamd not running, no device detected, SMTP failures and more.
+  - name: Architecture and configuration
+    url: https://github.com/linux-alex/ducky-can-shoot/tree/main/docs
+    about: How the code is put together and what every configuration key does.

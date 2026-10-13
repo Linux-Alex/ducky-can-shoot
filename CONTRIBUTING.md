@@ -11,7 +11,7 @@ the license of the project.
 ## Development environment
 
 ```bash
-git clone https://github.com/ducky-can-shoot/ducky-can-shoot
+git clone https://github.com/linux-alex/ducky-can-shoot
 cd ducky-can-shoot
 
 # a virtual environment is enough for the tests; the GUI needs PyQt6
@@ -322,3 +322,41 @@ Security issues do not go in the tracker. Follow `SECURITY.md`.
   new provider or a changed behaviour updates `README.md`, `docs/CONFIGURATION.md`,
   `docs/ARCHITECTURE.md` or `docs/ROADMAP.md` as applicable. A change whose
   documentation is stale is not finished.
+
+## AI-assisted contributions
+
+Part of this project was written with AI assistance (see the section with the same
+name in the README), so AI-assisted contributions are explicitly welcome here. The
+standard is the same for everybody, and disclosure is what makes that possible:
+
+- **Say so in the pull request.** The PR template has a field for it. One sentence
+  is enough: what was generated, and what you checked yourself.
+- **You are responsible for the code either way.** Read it, understand it, and be
+  ready to explain it in review. If you cannot explain a line, do not submit it.
+- **Tests are not optional because the code came from a model.** A generated
+  detection rule without a test that shows the evidence it relies on will be asked
+  to add one; so will a generated fix without a regression test.
+- **No invented facts.** Comments, documentation and commit messages must describe
+  what the code actually does. Claims about hosts, limits, formats or behaviours
+  need a source or a live check; the research notes in `docs/research/` show what
+  that looks like.
+- **No copied code with an incompatible license.** Model output can reproduce
+  training data. If a suggestion looks like it came from another project, do not
+  paste it; write the equivalent yourself and cite the original in the description.
+
+Reviewers will treat AI-assisted and hand-written code identically: the same
+questions about correctness, evidence and tests apply. What is not welcome is code
+whose author cannot explain why it is correct.
+
+## Where things live
+
+| Document | What it answers |
+| --- | --- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the modules fit together, the event design, the stage flow |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | every configuration key with its default |
+| [docs/CLI.md](docs/CLI.md) | the command line reference |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | when something does not work |
+| [docs/EXTENDING.md](docs/EXTENDING.md) | adding a rule, an engine, a host, a report format |
+| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | what DCS defends against, and what it does not |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | what is planned, including the Rust/C++ migration |
+| [docs/PUBLISHING.md](docs/PUBLISHING.md) | how this repository is set up and released |

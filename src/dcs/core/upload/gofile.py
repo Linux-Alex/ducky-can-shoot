@@ -39,7 +39,7 @@ from dcs.core.upload.base import (
 log = get_logger("upload.gofile")
 
 API_ROOT = "https://api.gofile.io"
-USER_AGENT = "DCS/0.1 (+https://github.com/ducky-can-shoot/ducky-can-shoot)"
+USER_AGENT = "DCS/0.1 (+https://github.com/linux-alex/ducky-can-shoot)"
 
 #: used when the API host is rate limited or unreachable
 FALLBACK_STORE_HOSTS = (

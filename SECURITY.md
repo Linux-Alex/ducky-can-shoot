@@ -31,7 +31,7 @@ Use GitHub's private vulnerability reporting instead:
 
 1. Open the repository's Security tab and choose "Report a vulnerability", or go
    directly to the private advisory form at
-   `https://github.com/ducky-can-shoot/ducky-can-shoot/security/advisories/new`.
+   `https://github.com/linux-alex/ducky-can-shoot/security/advisories/new`.
 2. Describe the issue with enough detail to reproduce it.
 
 A useful report contains:

@@ -1,21 +1,70 @@
+# Python
 __pycache__/
 *.py[cod]
-.venv/
-venv/
+*$py.class
+*.so
+.Python
 build/
 dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
 *.egg-info/
+*.egg
+.installed.cfg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Tooling caches
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.tox/
+.nox/
 .coverage
+.coverage.*
 htmlcov/
-*.log
+coverage.xml
+*.cover
+
+# Packaging artefacts
+*.whl
+*.tar.gz
+*.snap
+*.AppImage
+*.flatpak
+
+# Local runs: archives, reports, work files
 /out/
 /reports/
-# local secrets -- never commit
+/artifacts/
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.kate-swp
+*.kate-swp
+
+# Desktop and OS cruft
+.directory
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets -- never commit
 /config.toml
 /secrets.toml
 .env
+*.pem
+*.key
 # ...but the shipped example configuration is part of the project
 !examples/config.toml

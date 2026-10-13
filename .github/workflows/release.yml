@@ -1,0 +1,75 @@
+name: Release
+
+# Tagging builds the artefacts and attaches them to a GitHub release:
+#
+#   git tag -a v0.1.0 -m "Ducky Can Shoot 0.1.0"
+#   git push origin v0.1.0
+#
+# The wheel is checked before it is published: it is installed into a clean
+# environment and asked for its version and its QML directory, because a wheel
+# that cannot find its interface is worse than no wheel at all.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (defaults to the pushed tag)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Check the wheel contents
+        run: |
+          python -m pip install dist/*.whl
+          python -m dcs version
+          python -c "import os, dcs.gui.app as app; p = app.qml_directory(); assert os.path.isfile(os.path.join(p, 'Main.qml')), p; print('QML interface shipped:', p)"
+          python -c "import dcs.core.config as c, tomllib; print('default config keys:', len(tomllib.loads(c.dumps_toml(c.AppConfig().to_dict()))))"
+
+      - name: Store the artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Extract the changelog section for this tag
+        run: python3 scripts/changelog-for-tag.py "${GITHUB_REF_NAME}" --output release-notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Ducky Can Shoot ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md \
+            dist/*

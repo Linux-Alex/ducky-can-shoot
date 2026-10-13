@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest a detection rule, a host, a report format or anything else
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve
+      description: Describe the situation, not the implementation. "I cannot tell whether X" beats "add a button".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: If you know the code, name the module (a scanner rule, an upload adapter, a report format...).
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Detection rule or heuristic
+        - Scan engine
+        - Upload host
+        - Report or email
+        - Interface
+        - Command line
+        - Packaging
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence, samples or references
+      description: |
+        Detection rules are expected to cite the evidence they rely on: a sample
+        shape, a specification, a public write-up. Links welcome.
+    validations:
+      required: false

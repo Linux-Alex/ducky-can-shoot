@@ -1,0 +1,92 @@
+name: Bug report
+description: Something does not work the way it should
+title: "[bug] "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Two commands answer most of the
+        environment questions below:
+
+        ```bash
+        dcs doctor     # every dependency and the configuration
+        dcs version    # version and license
+        ```
+
+        Please redact anything personal from paths, labels and log lines.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or clicks, in order. A minimal example is worth a page of prose.
+      placeholder: |
+        1. dcs run --device /dev/sdb1 --no-upload
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it go wrong
+      options:
+        - The graphical interface
+        - Scanning and detections
+        - Archiving
+        - Upload
+        - Email
+        - Device detection or mounting
+        - Installing ClamAV
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: |
+        The log lines, the report excerpt or the terminal output. The live view
+        has a Copy button for the log pane; the CLI writes to stderr.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: dcs-version
+    attributes:
+      label: Ducky Can Shoot version
+      description: Output of dcs version.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: distribution
+    attributes:
+      label: Distribution and desktop
+      placeholder: "Kubuntu 26.04, Plasma 6.4, Wayland"
+    validations:
+      required: true
+  - type: input
+    id: engines
+    attributes:
+      label: Scan engines available
+      description: The engine lines from dcs doctor, or the Settings page.
+      placeholder: "ClamAV 1.5.4 (clamdscan), built-in heuristics 1.0"
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and docs/TROUBLESHOOTING.md.
+          required: true
+        - label: I am not reporting a missing detection as a bug without describing the sample.
+          required: false

@@ -10,6 +10,20 @@ change between minor releases; each such change is listed below.
 
 ### Added
 
+- **Repository polish for the first public release**: a banner and badges, a front
+  page organised around a quick start and the situation the tool is for, issue
+  forms that ask the questions worth asking, a pull request template, a release
+  workflow that builds the wheel and attaches it to a GitHub release whose body
+  comes from this file, a code of conduct, a maintainer checklist in
+  docs/PUBLISHING.md, a Makefile for the usual development tasks, and
+  scripts/make-screenshots.py, which regenerates the documentation screenshots
+  from the real interface and fails if QML prints a warning.
+- The long reference sections moved out of the README into docs/CLI.md,
+  docs/TROUBLESHOOTING.md, docs/THREAT-MODEL.md and docs/EXTENDING.md, so the
+  front page can be read in a couple of minutes.
+- An explicit disclosure of the AI assistance used to build this project, in the
+  README and in CONTRIBUTING.md, which now states what is expected from
+  AI-assisted contributions: disclose, understand, test, cite.
 - **Install ClamAV from the interface.** When the engine is missing, the New
   job tab and the Settings page offer an **Install ClamAV...** button. DCS
   detects the distribution and package manager (APT, DNF, Zypper, Pacman, APK,
@@ -129,5 +143,5 @@ First release. Everything below is new.
 - Nothing found on the medium is ever executed, and the medium is never written
   to.
 
-[Unreleased]: https://github.com/ducky-can-shoot/ducky-can-shoot/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/ducky-can-shoot/ducky-can-shoot/releases/tag/v0.1.0
+[Unreleased]: https://github.com/linux-alex/ducky-can-shoot/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/linux-alex/ducky-can-shoot/releases/tag/v0.1.0

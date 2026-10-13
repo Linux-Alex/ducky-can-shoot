@@ -1,0 +1,28 @@
+# Normalise line endings in the repository, whatever the platform.
+* text=auto eol=lf
+
+# Generated or binary files are never touched by the text filters.
+*.png binary
+*.jpg binary
+*.svg text eol=lf
+*.ico binary
+*.gz binary
+*.zip binary
+*.7z binary
+*.cvd binary
+
+# Keep diffs useful for the things people actually review.
+*.py text diff=python
+*.qml text
+*.toml text
+*.md text
+*.yml text
+*.yaml text
+
+# GitHub language statistics: the QML interface is not "C++".
+*.qml linguist-language=QML
+src/dcs/gui/qml/** linguist-detectable=true
+
+# Vendored or generated content that should not count as project code.
+docs/images/** linguist-documentation=true
+docs/research/** linguist-documentation=true

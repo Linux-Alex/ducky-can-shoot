@@ -1,0 +1,163 @@
+# Command line reference
+
+Every subcommand, flag and exit code of the `dcs` command. The graphical interface runs the same code,
+so everything documented here has an equivalent in the window.
+
+[Back to the README](../README.md)
+
+Global options, valid for every subcommand:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--config PATH` | the layered default files | Configuration file to use; it also becomes the file a save would target. |
+| `--log-level LEVEL` | `DCS_LOG_LEVEL`, else `WARNING` | Verbosity of the application log on stderr; one of `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `--version` | | Print `Ducky Can Shoot <version>` and exit. |
+| `-h`, `--help` | | Help. |
+
+Running `dcs` with no subcommand is the same as `dcs gui`.
+
+### `dcs gui`
+
+Starts the graphical interface. If PyQt6 is missing, the command explains what to
+install and exits with code 2. Accepts the global options only.
+
+### `dcs devices [--json]`
+
+Lists removable media found through lsblk: node, label, size, filesystem, bus and
+mount point. `--json` prints the full device dictionaries.
+
+```bash
+dcs devices
+dcs devices --json | jq '.[] | select(.mounted == false)'
+```
+
+Always exits 0, even when nothing is plugged in.
+
+### `dcs scan PATH [--engines IDS] [--max-file-size-mb N] [--json] [--quiet]`
+
+Scans a directory and prints what it found. This is the scan stage on its own: no
+archive, no upload, no email and no report.
+
+| Option | Meaning |
+| --- | --- |
+| `PATH` | Mount point or directory to scan (required). |
+| `--engines IDS` | Comma separated engine ids: `clamav`, `heuristic`. |
+| `--max-file-size-mb N` | Skip files larger than N MiB (0 means no limit). |
+| `--json` | Print the complete `ScanResult` as JSON instead of the summary. |
+| `--quiet` | Suppress progress output. |
+
+```bash
+dcs scan /media/$USER/USBSTICK
+dcs scan /media/$USER/USBSTICK --engines heuristic --max-file-size-mb 512
+dcs scan /media/$USER/USBSTICK --json > scan.json
+```
+
+Exit code: 0 clean, 1 suspicious or infected, 2 error or cancelled.
+
+### `dcs run [options]`
+
+Runs the complete job. Either `--device` or `--path` must be given.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--device NODE` | | Block device such as `/dev/sdb1`; mounted through udisks2 first if needed. |
+| `--path DIR` | | Directory to triage instead of a device. |
+| `--label NAME` | device label, else directory name | Name used in reports, archive file names and the email. |
+| `--to ADDR` | `email.to_addrs` | Recipient; repeatable, and comma or semicolon separated inside one value. |
+| `--provider ID` | `upload.provider` | Upload provider id, see `dcs providers`. |
+| `--output-dir DIR` | `general.output_dir` | Where the archive is written. |
+| `--no-archive` | off | Skip the archive stage. |
+| `--no-upload` | off | Never upload anything. |
+| `--no-email` | off | Do not send the email. |
+| `--dry-run-email` | off | Write the message to disk as `.eml` instead of sending it. |
+| `--yes` | off | Do not ask anything; this is also what allows publishing a non-clean image. |
+| `--json` | off | Print the full `JobResult` as JSON. |
+| `--quiet` | off | Suppress progress output. |
+
+```bash
+dcs run --device /dev/sdb1 --to analyst@example.org
+dcs run --path /mnt/stick --label "Field stick 7" --provider litterbox --yes
+dcs run --path /mnt/stick --no-upload --no-email --json | jq .verdict
+```
+
+Exit code: 0 clean, 1 suspicious or infected, 2 error or cancelled.
+
+### `dcs doctor [--json] [--offline] [--smtp]`
+
+Checks the Python version, the configuration for values that would break a run,
+every configured scan engine, the external tools (`lsblk`, `udisksctl`, `zip`,
+`7z`) and the writability of the output and report directories. With network
+access it also probes the configured upload provider; `--offline` skips that, and
+`--smtp` adds a connection test against the mail server.
+
+```bash
+dcs doctor
+dcs doctor --offline --json
+```
+
+Exit code: 0 when every check passed, **1 when at least one check failed**, 2 for
+an unexpected error. Note that this differs from `scan` and `run`, where 1 means
+"the medium is not clean".
+
+### `dcs install-clamav [--dry-run] [--terminal] [--yes] [--json]`
+
+Installs the optional ClamAV engine through the package manager of the machine
+it runs on. It prints the plan (distribution, package manager, the exact
+commands, the generated script) and asks for confirmation before anything runs;
+sudo collects the password in this terminal, so DCS never handles it.
+
+| Option | Meaning |
+| --- | --- |
+| `--dry-run` | Print the plan, the commands and the generated script; execute nothing. |
+| `--json` | With `--dry-run`: the same plan as JSON, for scripts. |
+| `--terminal` | Open a terminal emulator instead of using the graphical pkexec dialog. |
+| `--yes` | Do not ask for confirmation. |
+
+Exit code 0 when the installation succeeded, 2 when it failed or was cancelled.
+
+### `dcs config [init|show|path] [--show-secrets]`
+
+| Action | Meaning |
+| --- | --- |
+| `show` (the default) | Print the effective configuration as TOML, with secrets masked. |
+| `init` | Write a default configuration file if none exists yet. |
+| `path` | Print the configuration file that is in use. |
+
+`--show-secrets` prints stored values unmasked; do not pipe that into a log.
+
+```bash
+dcs config path
+dcs config show
+dcs config init
+```
+
+Exit code: 0 normally, 2 for an unknown action.
+
+### `dcs engines [--json]`
+
+Shows each configured scan engine, whether it is available, its version and, when
+it is not usable, why (ClamAV missing, clamd not answering, no signature database
+found). Always exits 0.
+
+### `dcs providers [--json]`
+
+Lists the upload providers with their label, whether an API key is required, their
+size limit and a note about retention. Always exits 0.
+
+### `dcs version [--json]`
+
+Prints the application name, the version and the license. Always exits 0.
+
+### Exit-code contract
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Clean: the run completed and the verdict is `clean`. Also used by the informational commands (`devices`, `engines`, `providers`, `version`, `config`) and by a `doctor` run in which every check passed. |
+| `1` | The medium is not clean: verdict `suspicious` or `infected`. For `doctor`: at least one check failed. |
+| `2` | The run failed, was cancelled or could not be evaluated (`error`, `cancelled`), a required argument was missing, or an unexpected exception was caught. |
+
+The mapping lives in one function, `exit_code_for`, and is part of the documented
+interface: scripts may rely on it.
+
+---
+
