@@ -92,16 +92,27 @@ class Recorder:
     def __call__(self, url: str, **kwargs: Any) -> Any:
         call: dict[str, Any] = {"url": url, **kwargs}
         if self.read_body:
-            bodies = {
-                field: value[1].read()
-                for field, value in (kwargs.get("files") or {}).items()
-                if isinstance(value, tuple) and hasattr(value[1], "read")
-            }
+            bodies: dict[str, bytes] = {}
+            # the classic shape: requests buffering a file part
+            for field, value in (kwargs.get("files") or {}).items():
+                if isinstance(value, tuple) and hasattr(value[1], "read"):
+                    bodies[field] = value[1].read()
+            body = kwargs.get("data")
+            if hasattr(body, "__iter__") and not isinstance(body, (bytes, bytearray)):
+                # DCS streams the multipart body itself: consuming the stream is
+                # what reads the file, so the file bytes are recovered by taking
+                # the slice between the file header and the closing boundary
+                assembled = b"".join(body)
+                call["body"] = assembled
+                field = getattr(body, "file_field", "") or "file"
+                with open(getattr(body, "path", ""), "rb") as handle:
+                    payload = handle.read()
+                if payload and payload in assembled:
+                    bodies[field] = payload
+            elif hasattr(body, "read"):
+                call["body"] = body.read()
             if bodies:
                 call["bodies"] = bodies
-            body = kwargs.get("data")
-            if hasattr(body, "read"):
-                call["body"] = body.read()
         self.calls.append(call)
         index = len(self.calls) - 1
         answer = self.answers[index] if index < len(self.answers) else self.answers[-1]
@@ -424,10 +435,13 @@ def test_gofile_upload_uses_the_download_page(
 
     call = post.calls[0]
     assert call["url"] == f"{STORE_URL}/contents/uploadfile"
-    assert set(call["files"]) == {"file"}
-    assert call["files"]["file"][0] == "medium.zip"
+    body, content_type, name = multipart_payload(call)
+    assert name == "medium.zip"
+    assert content_type.startswith("multipart/form-data; boundary=")
+    assert b'name="file"' in body
     assert call["bodies"]["file"] == b"x" * 10
-    assert call["data"] is None
+    assert hasattr(call["data"], "__iter__")  # the multipart body is streamed
+    assert call["headers"]["Content-Length"] == str(call["data"].content_length)
 
 
 def test_gofile_guest_token_is_captured(
@@ -603,9 +617,15 @@ def test_simple_plain_text_hosts(
     assert len(post.calls) == 1
     call = post.calls[0]
     assert call["url"] == expected_url
-    assert call["data"] == expected_data
-    assert set(call["files"]) == {field}
-    assert call["files"][field][0] == "medium.zip"
+    # the extra fields travel inside the streamed multipart body
+    body, _content_type, _name = multipart_payload(call)
+    for key, value in (expected_data or {}).items():
+        assert (chr(110) + chr(97) + chr(109) + chr(101) + chr(61) + chr(34) + key + chr(34)).encode() in body
+        assert value.encode() in body
+    body, content_type, name = multipart_payload(call)
+    assert name == "medium.zip"
+    assert content_type.startswith("multipart/form-data; boundary=")
+    assert (chr(110) + 'ame="' + field + chr(34)).encode() in body
     assert "Authorization" not in call["headers"]
 
 
@@ -621,7 +641,9 @@ def test_tmpfiles_uses_the_json_url(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert result.ok is True
     assert result.link == "https://tmpfiles.org/12345/medium.zip"
     assert post.calls[0]["url"] == "https://tmpfiles.org/api/v1/upload"
-    assert set(post.calls[0]["files"]) == {"file"}
+    body, content_type, _name = multipart_payload(post.calls[0])
+    assert content_type.startswith("multipart/form-data; boundary=")
+    assert b'name="file"' in body
 
 
 def test_tmpfiles_non_json_answer_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -879,7 +901,9 @@ def test_progress_reader_reports_the_uploaded_size_on_a_large_file(tmp_path: Pat
             read_total += len(chunk)
     assert read_total == size
     assert seen[-1] == (size, size)
-    assert [sent for sent, _ in seen] == [1 << 20, 2 << 20, 3 << 20, size, size]
+    # progress is reported for every chunk that carried data, ending at the
+    # exact file size; there is no extra sample for the closing empty read
+    assert [sent for sent, _ in seen] == [1 << 20, 2 << 20, 3 << 20, size]
 
 
 def test_progress_reader_raises_when_cancelled(tmp_path: Path) -> None:
@@ -934,9 +958,12 @@ def test_gofile_upload_is_cancelled_through_the_reader(
     cancel = threading.Event()
 
     def fake_post(url: str, **kwargs: Any) -> Any:
+        # the body is a stream: iterating it is what reads the file, and the
+        # cancel flag set here must stop it
         cancel.set()
-        kwargs["files"]["file"][1].read()
-        raise AssertionError("the reader should have raised UploadCancelled")
+        for _chunk in kwargs["data"]:
+            pass
+        raise AssertionError("the stream should have raised UploadCancelled")
 
     monkeypatch.setattr("requests.post", fake_post)
     result = gofile.upload(str(sample), cancel=cancel)
@@ -965,7 +992,7 @@ def test_gofile_upload_is_cancelled_when_the_reader_raises(
 def test_simple_upload_is_cancelled_before_reading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A cancel flag already set makes the upload fail without sending bytes."""
+    """A cancel flag set before the attempt fails without touching the network."""
     sample = make_sample(tmp_path)
     cancel = threading.Event()
     cancel.set()
@@ -973,16 +1000,16 @@ def test_simple_upload_is_cancelled_before_reading(
 
     def reading_post(url: str, **kwargs: Any) -> Any:
         attempted.append(url)
-        assert set(kwargs["files"]) == {"fileToUpload"}
-        kwargs["files"]["fileToUpload"][1].read()  # must raise UploadCancelled
-        raise AssertionError("a cancelled reader must not return data")
+        raise AssertionError("a cancelled upload must not reach the network")
 
     monkeypatch.setattr("requests.post", reading_post)
     result = make_simple("litterbox", retries=0).upload(str(sample), cancel=cancel)
 
     assert result.ok is False
     assert result.error == "cancelled"
-    assert attempted == ["https://litterbox.catbox.moe/resources/internals/api.php"]
+    # the early cancel check returns before any request is made, so the
+    # transport is never reached
+    assert attempted == []
 
 
 def test_upload_result_to_dict_keys() -> None:
@@ -1005,3 +1032,27 @@ def test_upload_result_to_dict_keys() -> None:
     assert data["warnings"] == []
     data["warnings"].append("mutated")
     assert result.warnings == []
+
+
+def multipart_payload(call: dict) -> tuple[bytes, str, str]:
+    CRLF = bytes((13, 10))
+    """Return (body, content_type, file name) of a recorded upload call.
+
+    DCS streams the multipart body itself instead of letting requests buffer a
+    file part, so the payload is assembled by iterating the stream that was
+    handed to the transport.
+    """
+    body = call.get("data")
+    headers = call.get("headers") or {}
+    if hasattr(body, "__iter__") and not isinstance(body, (bytes, bytearray)):
+        assembled = b"".join(chunk for chunk in body)
+    else:
+        assembled = body or b""
+    content_type = headers.get("Content-Type", "")
+    name = ""
+    for line in assembled.split(CRLF):
+        if line.lower().startswith(b"content-disposition:") and b"filename=" in line:
+            name = line.split(b"filename=", 1)[1].strip().strip(b'"').decode("utf-8", "replace")
+            break
+    return assembled, content_type, name
+

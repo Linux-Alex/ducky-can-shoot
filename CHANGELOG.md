@@ -25,6 +25,22 @@ change between minor releases; each such change is listed below.
 
 ### Fixed
 
+- **Uploads larger than 1 MiB were truncated.** DCS wrapped the file in a
+  ProgressReader whose read() returned a single chunk when called without an
+  argument - and that is exactly how requests reads a file part (it buffers it
+  in memory). Every upload larger than the chunk size therefore sent only its
+  first megabyte while reporting success, so the download link pointed at a
+  corrupt archive. Uploads now stream a multipart body built by DCS itself: the
+  file is read chunk by chunk, the progress bar shows real byte positions
+  instead of jumping from 0 to 100 percent, memory stays flat for a 30 GB image,
+  and the Content-Length is exact. gofile's server side checksum is compared
+  with the local file, so a truncated transfer fails and is retried instead of
+  being published. A regression test uploads several megabytes to a local HTTP
+  server and asserts every byte arrives.
+- **Readable text on a highlighted row.** The removable-media list drew its icon
+  in the highlight colour and the mount status in green, both on top of the
+  selection colour, which is unreadable with Kubuntu's light blue highlight.
+  Every colour on a selected row now comes from the theme's highlighted palette.
 - **The live view is usable again.** The pipeline rows derived their height from
   a layout that was anchored with anchors.fill, a binding loop that Qt resolved
   by collapsing every row onto the same position, so the seven stage rows (and

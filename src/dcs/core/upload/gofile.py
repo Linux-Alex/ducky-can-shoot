@@ -23,17 +23,17 @@ synthesised from the file id.
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
 from dcs.core.log import get_logger
 from dcs.core.upload.base import (
     BaseProvider,
+    MultipartStream,
     ProgressFn,
-    ProgressReader,
     UploadCancelled,
     UploadResult,
+    file_md5,
 )
 
 log = get_logger("upload.gofile")
@@ -183,6 +183,10 @@ class GofileProvider(BaseProvider):
         if problem:
             return self._result(path, started, ok=False, error=problem)
 
+        if cancel is not None and cancel.is_set():
+            # nothing is sent when the user cancelled before the first attempt
+            return self._result(path, started, ok=False, error="cancelled")
+
         last_error = ""
         for attempt in range(1, self.retries + 2):
             try:
@@ -190,14 +194,21 @@ class GofileProvider(BaseProvider):
                 fields: dict[str, str] = {}
                 if self._folder_id:
                     fields["folderId"] = self._folder_id
-                with ProgressReader(path, progress=progress, cancel=cancel) as reader:
-                    response = requests.post(
-                        f"{server}/contents/uploadfile",
-                        files={"file": (os.path.basename(path), reader)},
-                        data=fields or None,
-                        headers=self._headers(),
-                        timeout=(30, self.timeout),
-                    )
+                # The body is streamed from disk: requests would otherwise read
+                # the whole image into memory (and report no progress at all).
+                stream = MultipartStream(
+                    path,
+                    file_field="file",
+                    fields=fields,
+                    progress=progress,
+                    cancel=cancel,
+                )
+                response = requests.post(
+                    f"{server}/contents/uploadfile",
+                    data=stream,
+                    headers={**self._headers(), **stream.headers},
+                    timeout=(30, self.timeout),
+                )
                 if response.status_code >= 400:
                     raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
                 payload = response.json()
@@ -206,6 +217,17 @@ class GofileProvider(BaseProvider):
                 link = data.get("downloadPage") or data.get("downloadLink") or ""
                 if status not in ("ok", "success") or not link:
                     raise RuntimeError(f"unexpected response: {str(payload)[:200]}")
+                # gofile returns the md5 of what it stored: a mismatch means the
+                # transfer was corrupted or truncated, so the link must not be
+                # handed out as if the image were intact
+                remote_md5 = str(data.get("md5") or "").lower()
+                if remote_md5:
+                    local_md5 = file_md5(path)
+                    if local_md5 != remote_md5:
+                        raise RuntimeError(
+                            f"the host stored a different file (md5 {remote_md5[:12]} "
+                            f"instead of {local_md5[:12]}); retrying"
+                        )
                 # an anonymous upload hands back a guest token: reuse it so the
                 # next part of a split image lands in the same account
                 guest_token = str(data.get("guestToken") or "")
@@ -223,6 +245,10 @@ class GofileProvider(BaseProvider):
                         "code": data.get("code") or "",
                         "parentFolder": data.get("parentFolderCode") or "",
                         "server": server,
+                        # the host checksum, already compared against the local
+                        # file above; kept so the report can show it
+                        "md5": remote_md5,
+                        "verified": bool(remote_md5),
                     },
                 )
             except UploadCancelled:

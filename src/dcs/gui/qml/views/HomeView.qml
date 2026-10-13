@@ -108,11 +108,16 @@ Controls.ScrollView {
                         contentItem: RowLayout {
                             spacing: Kirigami.Units.largeSpacing
 
+                            // On a highlighted row every colour has to come from the
+                            // theme's highlighted palette: a green "mounted" line or a
+                            // highlight-coloured icon on the Kubuntu light blue
+                            // selection is unreadable.
+
                             Kirigami.Icon {
                                 source: "drive-removable-media-usb"
                                 implicitWidth: Kirigami.Units.iconSizes.medium
                                 implicitHeight: Kirigami.Units.iconSizes.medium
-                                color: deviceRow.highlighted ? Kirigami.Theme.highlightColor
+                                color: deviceRow.highlighted ? Kirigami.Theme.highlightedTextColor
                                                              : Kirigami.Theme.textColor
                             }
 
@@ -122,6 +127,8 @@ Controls.ScrollView {
 
                                 Controls.Label {
                                     text: deviceRow.label
+                                    color: deviceRow.highlighted ? Kirigami.Theme.highlightedTextColor
+                                                                 : Kirigami.Theme.textColor
                                     font.weight: deviceRow.highlighted ? Font.DemiBold : Font.Normal
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
@@ -130,7 +137,9 @@ Controls.ScrollView {
                                 Controls.Label {
                                     Layout.fillWidth: true
                                     font: Kirigami.Theme.smallFont
-                                    opacity: 0.7
+                                    opacity: deviceRow.highlighted ? 0.9 : 0.7
+                                    color: deviceRow.highlighted ? Kirigami.Theme.highlightedTextColor
+                                                                 : Kirigami.Theme.textColor
                                     elide: Text.ElideRight
                                     text: {
                                         let parts = [deviceRow.devicePath, deviceRow.sizeText];
@@ -150,12 +159,14 @@ Controls.ScrollView {
                                 Controls.Label {
                                     Layout.fillWidth: true
                                     font: Kirigami.Theme.smallFont
-                                    opacity: 0.6
+                                    opacity: deviceRow.highlighted ? 0.9 : 0.75
+                                    color: deviceRow.highlighted ? Kirigami.Theme.highlightedTextColor
+                                                                 : (deviceRow.mounted
+                                                                    ? Kirigami.Theme.positiveTextColor
+                                                                    : Kirigami.Theme.neutralTextColor)
                                     elide: Text.ElideMiddle
                                     text: deviceRow.mounted ? ("mounted at " + deviceRow.mountPath)
                                                             : "not mounted yet - it will be mounted automatically"
-                                    color: deviceRow.mounted ? Kirigami.Theme.positiveTextColor
-                                                             : Kirigami.Theme.neutralTextColor
                                 }
                             }
 

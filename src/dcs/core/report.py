@@ -293,9 +293,16 @@ def render_html(result: JobResult, config: ReportConfig | None = None) -> str:
         for upload in result.uploads:
             state = "uploaded" if upload.ok else f"failed: {upload.error}"
             link = f'<a href="{_esc(upload.link)}">{_esc(upload.link)}</a>' if upload.ok else ""
+            integrity = ""
+            remote_md5 = str((upload.raw or {}).get("md5") or "")
+            if upload.ok and remote_md5:
+                integrity = (
+                    "<br><span class='mono'>the host confirmed the transfer by checksum "
+                    f"(md5 {_esc(remote_md5)})</span>"
+                )
             add(
                 f"<tr><th>{_esc(upload.provider)}</th><td class='path'>{_esc(os.path.basename(upload.path))} "
-                f"- {_esc(state)}<br>{link}</td></tr>"
+                f"- {_esc(state)}<br>{link}{integrity}</td></tr>"
             )
     else:
         add(f"<tr><th>Upload</th><td>{_esc(result.upload_skipped_reason or 'not attempted')}</td></tr>")
@@ -413,6 +420,12 @@ def render_text(result: JobResult, config: ReportConfig | None = None) -> str:
         lines.append("NOTES")
         lines.append("-" * 68)
         lines.extend(f"- {warning}" for warning in result.warnings)
+    for upload in result.uploads:
+        if upload.ok and (upload.raw or {}).get("md5"):
+            lines.append(
+                f"Upload integrity: the host confirmed the transfer by checksum "
+                f"(md5 {upload.raw['md5']})"
+            )
     lines.append("")
     lines.append(f"{APP_NAME} - {APP_LICENSE} - {APP_HOMEPAGE}")
     return "\n".join(lines)

@@ -24,6 +24,7 @@ from urllib.parse import quote
 from dcs.core.log import get_logger
 from dcs.core.upload.base import (
     BaseProvider,
+    MultipartStream,
     ProgressFn,
     ProgressReader,
     UploadCancelled,
@@ -243,29 +244,44 @@ class SimpleHostProvider(BaseProvider):
                 path, started, ok=False, error=f"{self.spec.label} requires an API key"
             )
 
+        if cancel is not None and cancel.is_set():
+            # nothing is sent when the user cancelled before the first attempt
+            return self._result(path, started, ok=False, error="cancelled")
+
         last_error = ""
         for attempt in range(1, self.retries + 2):
             try:
-                with ProgressReader(path, progress=progress, cancel=cancel) as reader:
-                    files = {self.spec.file_field: (os.path.basename(path), reader)}
-                    data = dict(self.spec.fields) or None
-                    url = self._url_for(path)
-                    if self.spec.method == "PUT":
-                        # pixeldrain reads the body, not a multipart form
+                url = self._url_for(path)
+                if self.spec.method == "PUT":
+                    # pixeldrain reads the raw body, not a multipart form: the
+                    # reader streams it and the length is stated explicitly so
+                    # the server does not have to guess
+                    with ProgressReader(path, progress=progress, cancel=cancel) as reader:
                         response = requests.put(
                             url,
                             data=reader,
-                            headers=self._headers(),
+                            headers={
+                                **self._headers(),
+                                "Content-Type": "application/octet-stream",
+                                "Content-Length": str(reader.size),
+                            },
                             timeout=(30, self.timeout),
                         )
-                    else:
-                        response = requests.post(
-                            url,
-                            files=files,
-                            data=data,
-                            headers=self._headers(),
-                            timeout=(30, self.timeout),
-                        )
+                else:
+                    # multipart, streamed from disk with an exact Content-Length
+                    stream = MultipartStream(
+                        path,
+                        file_field=self.spec.file_field,
+                        fields=dict(self.spec.fields),
+                        progress=progress,
+                        cancel=cancel,
+                    )
+                    response = requests.post(
+                        url,
+                        data=stream,
+                        headers={**self._headers(), **stream.headers},
+                        timeout=(30, self.timeout),
+                    )
                 if response.status_code >= 400:
                     raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
                 link = self._extract_link(response.text)
