@@ -166,6 +166,8 @@ def test_clean_medium_runs_every_stage(
     assert message.suffix == ".eml"
     assert message.is_file()
     assert message.parent == tmp_path / "outbox"
+    # whichever advisory the job produced names the directory it triaged, so the
+    # source is always identifiable from the mail alone
     assert str(clean_tree) in result.email.body_preview
 
     # the summary handed to the sink is the serialised result

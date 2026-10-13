@@ -12,9 +12,12 @@ jobs:
   # QtQuick Controls) have to come from the same Qt build as the interpreter's
   # bindings, and that only holds when both are installed by the distribution.
   test-distro-qt:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04, which ubuntu-latest still points at, carries no KF6 at all:
+    # Kirigami 6 is not packaged there, so the interface cannot even be imported.
+    # 26.04 has Qt 6.10 and Kirigami 6.24, which is what this project targets.
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the Qt, QML and KDE runtime
         run: |
@@ -53,11 +56,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -74,7 +77,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@v3
+      - uses: actions/checkout@v7
+      - uses: astral-sh/ruff-action@v4
         with:
           args: check src tests

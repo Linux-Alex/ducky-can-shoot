@@ -293,8 +293,10 @@ class _RunContext:
 
         # advisory, never blocking: the tool also works on a plain folder
         if self.device is None:
+            # the warning names the directory: without a device there is nothing
+            # else in the report that says what was actually triaged
             self.result.warnings.append(
-                "the source is a plain directory, not a removable device: "
+                f"{source} is a plain directory, not a removable device: "
                 "the report will not contain any drive metadata"
             )
         elif not is_removable_mount(source):

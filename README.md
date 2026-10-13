@@ -4,7 +4,8 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
-  <img src="https://img.shields.io/badge/tests-556%20passing-brightgreen" alt="556 tests passing">
+  <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/tests-557%20passing-brightgreen" alt="557 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.1.0%20alpha-orange" alt="Status: 0.1.0 alpha">
@@ -82,13 +83,15 @@ sudo dnf install python3 python3-pyqt6 kf6-kirigami qt6-qtdeclarative zip udisks
 sudo pacman -S python python-pyqt6 kirigami qt6-declarative zip udisks2 util-linux
 ```
 
-Qt has to come from the same build as the QML modules, which is why distribution
-packages are preferred over a wheel.
+On Ubuntu the Qt 6 and Kirigami 6 packages above mean **26.04 or newer**: 24.04
+ships no KDE Frameworks 6 at all, so `qml6-module-org-kde-kirigami` does not
+exist there and apt refuses the whole command. Qt has to come from the same build
+as the QML modules, which is why distribution packages are preferred over a wheel.
 
 ### 2. Install Ducky Can Shoot
 
 ```bash
-git clone https://github.com/linux-alex/ducky-can-shoot.git
+git clone https://github.com/Linux-Alex/ducky-can-shoot.git
 cd ducky-can-shoot
 ./scripts/install.sh          # user level: ~/.local, no root needed
 ```

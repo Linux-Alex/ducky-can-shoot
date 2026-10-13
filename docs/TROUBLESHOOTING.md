@@ -6,6 +6,29 @@ shows what the pipeline is doing.
 
 [Back to the README](../README.md)
 
+### The interface does not start: a QML module is missing
+
+```text
+QQmlApplicationEngine failed to load component
+module "org.kde.kirigami" is not installed
+```
+
+The interface is Qt Quick with Kirigami, and Kirigami 6 has to come from your
+distribution, from the same Qt build as the PyQt6 packages:
+
+```bash
+sudo apt install python3-pyqt6 python3-pyqt6.qtqml python3-pyqt6.qtquick \
+  qml6-module-org-kde-kirigami qml6-module-qtquick-controls \
+  qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \
+  qml6-module-qtquick-templates qml6-module-qtqml-workerscript
+```
+
+On Ubuntu that means 26.04 or newer. Ubuntu 24.04 carries no KDE Frameworks 6
+packages, so no amount of Qt 6 packages will make the interface start there; use
+`dcs` from the command line on such a system.
+
+`dcs doctor` reports which part is missing.
+
 ### ClamAV is missing
 
 ```text

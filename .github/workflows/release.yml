@@ -25,9 +25,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -40,11 +40,22 @@ jobs:
         run: |
           python -m pip install dist/*.whl
           python -m dcs version
-          python -c "import os, dcs.gui.app as app; p = app.qml_directory(); assert os.path.isfile(os.path.join(p, 'Main.qml')), p; print('QML interface shipped:', p)"
+          # The interface has to travel inside the wheel.  It is checked on the
+          # filesystem instead of imported: this job installs no PyQt6, because a
+          # wheel that cannot be installed without Qt is exactly what the command
+          # line user wants.
+          python - <<'EOF'
+          import os
+          import dcs
+
+          qml = os.path.join(os.path.dirname(dcs.__file__), "gui", "qml")
+          assert os.path.isfile(os.path.join(qml, "Main.qml")), qml
+          print("QML interface shipped:", qml)
+          EOF
           python -c "import dcs.core.config as c, tomllib; print('default config keys:', len(tomllib.loads(c.dumps_toml(c.AppConfig().to_dict()))))"
 
       - name: Store the artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/*
@@ -55,9 +66,9 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist

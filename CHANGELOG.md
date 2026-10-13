@@ -98,6 +98,16 @@ change between minor releases; each such change is listed below.
   warning instead of being stored as a string, and the TOML writer escapes
   control characters, so a value containing a newline no longer produces a file
   that tomllib rejects (which silently reset every setting).
+- **The CI job that tests the real interface no longer fails on a missing
+  package.** It installed Kirigami 6 from apt on `ubuntu-latest`, which still
+  means Ubuntu 24.04 - a release that has no KDE Frameworks 6 packages at all,
+  so `qml6-module-org-kde-kirigami` does not exist there and apt aborted the
+  step after eight seconds. The job now asks for `ubuntu-26.04`, the release
+  this project targets, where Qt 6.10 and Kirigami 6.24 are packaged. The
+  workflow actions moved to their current majors (checkout 7, setup-python 7,
+  ruff-action 4, upload-artifact 7, download-artifact 8), which also clears the
+  Node 20 deprecation warning, and the core matrix now covers Python 3.14 as
+  well as 3.11, 3.12 and 3.13.
 
 ## [0.1.0] - 2026-01
 
@@ -153,5 +163,5 @@ First release. Everything below is new.
 - Nothing found on the medium is ever executed, and the medium is never written
   to.
 
-[Unreleased]: https://github.com/linux-alex/ducky-can-shoot/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/linux-alex/ducky-can-shoot/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Linux-Alex/ducky-can-shoot/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.1.0
