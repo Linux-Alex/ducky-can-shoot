@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Ducky Can Shoot
+Name[sl]=Ducky Can Shoot
+GenericName=USB malware triage
+GenericName[sl]=Preverjanje USB medijev
+Comment=Scan a USB medium, archive it, upload the image and email the verdict
+Comment[sl]=Preveri USB medij, ga arhiviraj, naloži sliko in pošlji izvid po e-pošti
+Exec=dcs
+TryExec=dcs
+Icon=org.kde.dcs
+Terminal=false
+StartupNotify=true
+StartupWMClass=org.kde.dcs
+Categories=System;Security;
+Keywords=usb;malware;antivirus;virus;scan;clamav;triage;security;
+Keywords[sl]=usb;malware;antivirus;virus;preverjanje;clamav;varnost;
+X-KDE-StartupNotify=true

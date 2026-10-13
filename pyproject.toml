@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ducky-can-shoot"
+version = "0.1.0"
+description = "DCS - scan a USB drive for malware, archive it, upload the image and email the verdict."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Ducky Can Shoot contributors" }]
+keywords = ["security", "usb", "malware", "clamav", "kirigami", "kde", "forensics"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: X11 Applications :: Qt",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: System :: Systems Administration",
+]
+dependencies = [
+  "PyQt6>=6.5",
+  "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
+toml = ["tomlkit>=0.12"]
+
+[project.urls]
+Homepage = "https://github.com/ducky-can-shoot/ducky-can-shoot"
+Documentation = "https://github.com/ducky-can-shoot/ducky-can-shoot/tree/main/docs"
+Issues = "https://github.com/ducky-can-shoot/ducky-can-shoot/issues"
+
+[project.scripts]
+dcs = "dcs.cli:main"
+dcs-gui = "dcs.cli:gui_main"
+
+[project.gui-scripts]
+ducky-can-shoot = "dcs.cli:gui_main"
+
+[tool.hatch.build.targets.wheel]
+# The QML files, the icons and the hash list live inside the package, so they
+# are picked up automatically: no force-include entries are needed (they would
+# make hatchling add the same path twice and fail the build).
+packages = ["src/dcs"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "scripts", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:dcs.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF", "N"]
+# Qt's Python bindings require camelCase methods and properties, and the
+# enums stay (str, Enum) instead of StrEnum so that isinstance checks keep
+# working for callers that pass plain strings.
+ignore = ["E501", "N802", "N803", "N806", "N815", "N816", "UP042"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["dcs"]
+ignore_missing_imports = true

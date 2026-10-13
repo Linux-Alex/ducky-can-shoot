@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Development launcher: run DCS straight from a source checkout, no install.
+#
+#   ./bin/dcs                       start the GUI
+#   ./bin/dcs scan /media/$USER/STICK
+#   ./bin/dcs run --path ./some/dir --no-upload
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m dcs "$@"

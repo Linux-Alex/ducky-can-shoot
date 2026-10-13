@@ -1,0 +1,569 @@
+"""Configuration: dataclasses, TOML load/save and secret resolution.
+
+Layering (later wins)
+---------------------
+1. built-in defaults
+2. /etc/dcs/config.toml            (system wide)
+3. ~/.config/dcs/config.toml       (per user; written by the GUI)
+4. the file passed with --config
+5. environment variables           (DCS_* and documented per-secret vars)
+
+Secrets are never required in the file: every secret has an environment
+variable and an optional shell command fallback, so the config can live in a
+dotfiles repository without leaking passwords.
+"""
+
+from __future__ import annotations
+
+import os
+import shlex
+import subprocess
+import tomllib
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from pathlib import Path
+from typing import Any, get_args, get_origin
+
+from dcs.core.log import get_logger
+
+log = get_logger("config")
+
+SYSTEM_CONFIG = "/etc/dcs/config.toml"
+
+
+# ---------------------------------------------------------------------------
+# paths
+# ---------------------------------------------------------------------------
+
+
+def xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+
+
+def xdg_data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+
+
+def default_config_path() -> Path:
+    return xdg_config_home() / "dcs" / "config.toml"
+
+
+def default_data_dir() -> Path:
+    return xdg_data_home() / "dcs"
+
+
+def default_reports_dir() -> Path:
+    return default_data_dir() / "reports"
+
+
+def default_work_dir() -> Path:
+    return default_data_dir() / "work"
+
+
+# ---------------------------------------------------------------------------
+# sections
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GeneralConfig:
+    #: ask before starting a job that will upload data
+    confirm_before_upload: bool = True
+    #: keep the local archive after a successful upload
+    keep_archive: bool = True
+    #: directory for archives, reports and work files ("" = XDG default)
+    output_dir: str = ""
+    #: UI refresh interval for the live view, milliseconds
+    ui_refresh_ms: int = 100
+
+
+@dataclass
+class ClamAVConfig:
+    enabled: bool = True
+    #: prefer clamdscan (daemon, much faster) over clamscan
+    prefer_daemon: bool = True
+    clamdscan_binary: str = "clamdscan"
+    clamscan_binary: str = "clamscan"
+    #: extra command line arguments appended to every invocation
+    extra_args: list[str] = field(default_factory=list)
+    #: files handed to one engine invocation
+    batch_size: int = 400
+    #: warn when the signature database is older than this many days
+    max_database_age_days: int = 7
+
+
+@dataclass
+class ScanConfig:
+    #: engine ids: clamav, heuristic
+    engines: list[str] = field(default_factory=lambda: ["clamav", "heuristic"])
+    #: skip scanning individual files larger than this (MiB); 0 = no limit
+    max_file_size_mb: int = 4096
+    #: stop after this many findings (0 = keep going)
+    max_findings: int = 0
+    #: stop after this many files (0 = all); handy for a quick look
+    max_files: int = 0
+    follow_symlinks: bool = False
+    include_hidden: bool = True
+    #: compute sha256 for every finding (slower, better reports)
+    hash_findings: bool = True
+    #: glob patterns skipped during the walk
+    exclude_globs: list[str] = field(
+        default_factory=lambda: ["System Volume Information/*", "$RECYCLE.BIN/*", "*.tmp"]
+    )
+    #: threat names from ClamAV that should never mark the drive infected
+    #: (PUA/adware are reported but do not block the upload by default)
+    blocking_severity: str = "high"
+    clamav: ClamAVConfig = field(default_factory=ClamAVConfig)
+
+
+@dataclass
+class ArchiveConfig:
+    enabled: bool = True
+    #: zip (default) or 7z
+    format: str = "zip"
+    #: 0 = store, 1 = fastest ... 9 = smallest
+    compression_level: int = 6
+    #: split into volumes of this size in MiB (0 = single file)
+    split_size_mb: int = 0
+    #: warn in the GUI/CLI above this size in GiB (0 = never warn)
+    size_warn_gb: int = 20
+    #: when to build the image: clean | always | never
+    when: str = "clean"
+    #: prepend the device label to the archive name
+    use_device_label: bool = True
+    #: refuse to archive when the target filesystem has less free space than
+    #: this fraction of the estimated archive size
+    min_free_space_ratio: float = 1.1
+
+
+@dataclass
+class GofileConfig:
+    #: guest token; empty means "create a guest account on the fly"
+    token: str = ""
+    token_command: str = ""
+    #: root folder name created per job ("" = upload to the root)
+    folder_prefix: str = "DCS"
+
+
+@dataclass
+class PixeldrainConfig:
+    api_key: str = ""
+    api_key_command: str = ""
+    #: '' keeps the host compiled into the adapter; set it to use a mirror
+    base_url: str = ""
+
+
+@dataclass
+class SimpleHostConfig:
+    """Configuration for the plain single-POST hosts."""
+
+    base_url: str = ""
+
+
+@dataclass
+class UploadConfig:
+    enabled: bool = True
+    #: adapter id; see dcs.core.upload.registry
+    provider: str = "gofile"
+    #: never | clean | always  -- anything but 'clean' may publish malware
+    upload_when: str = "clean"
+    #: seconds to wait for one upload attempt before retrying
+    timeout_s: int = 1800
+    retries: int = 2
+    #: delete the local archive once the upload succeeded
+    delete_archive_after_upload: bool = False
+    #: one section per adapter id; base_url is only needed for a mirror
+    gofile: GofileConfig = field(default_factory=GofileConfig)
+    pixeldrain: PixeldrainConfig = field(default_factory=PixeldrainConfig)
+    x0at: SimpleHostConfig = field(default_factory=SimpleHostConfig)
+    tempsh: SimpleHostConfig = field(default_factory=SimpleHostConfig)
+    catbox: SimpleHostConfig = field(default_factory=SimpleHostConfig)
+    tmpfiles: SimpleHostConfig = field(default_factory=SimpleHostConfig)
+    litterbox: SimpleHostConfig = field(default_factory=SimpleHostConfig)
+
+
+@dataclass
+class EmailConfig:
+    enabled: bool = True
+    smtp_host: str = ""
+    smtp_port: int = 587
+    #: starttls | ssl | none
+    security: str = "starttls"
+    username: str = ""
+    password: str = ""
+    password_command: str = ""
+    from_addr: str = ""
+    from_name: str = "Ducky Can Shoot"
+    to_addrs: list[str] = field(default_factory=list)
+    cc_addrs: list[str] = field(default_factory=list)
+    bcc_addrs: list[str] = field(default_factory=list)
+    reply_to: str = ""
+    subject_template: str = "[DCS] {verdict} - {device} ({files} files)"
+    #: attach the HTML report and the findings CSV
+    attach_report: bool = True
+    #: send even when the drive is clean (the whole point of the tool)
+    always_send: bool = True
+    #: seconds to wait for the server
+    timeout_s: int = 60
+    #: do not verify the TLS certificate (self signed internal relays)
+    insecure_tls: bool = False
+    #: file used by --dry-run to dump the message instead of sending it
+    dry_run_dir: str = ""
+
+
+@dataclass
+class ReportConfig:
+    enabled: bool = True
+    directory: str = ""
+    format: str = "html"
+    #: include the per-file list of every scanned file (big for large sticks)
+    include_file_list: bool = False
+    #: maximum findings stored in the report
+    max_findings: int = 500
+    #: keep a JSON copy of the result for automation
+    write_json: bool = True
+
+
+@dataclass
+class GuiConfig:
+    #: the interface deliberately follows the Plasma colour scheme and icon
+    #: theme instead of offering a theme switch; Kirigami 6 exposes colour sets
+    #: (Window/View/Button/...), not a light/dark override.
+    remember_window_size: bool = True
+    window_width: int = 1180
+    window_height: int = 780
+    show_log_pane: bool = True
+    auto_select_new_device: bool = True
+    #: open the result page automatically when the job finishes
+    switch_to_result: bool = True
+
+
+@dataclass
+class AppConfig:
+    general: GeneralConfig = field(default_factory=GeneralConfig)
+    scan: ScanConfig = field(default_factory=ScanConfig)
+    archive: ArchiveConfig = field(default_factory=ArchiveConfig)
+    upload: UploadConfig = field(default_factory=UploadConfig)
+    email: EmailConfig = field(default_factory=EmailConfig)
+    report: ReportConfig = field(default_factory=ReportConfig)
+    gui: GuiConfig = field(default_factory=GuiConfig)
+    #: where this config was loaded from (informational)
+    source_path: str = ""
+
+    # -- derived paths ----------------------------------------------------
+    @property
+    def output_dir(self) -> Path:
+        return Path(self.general.output_dir).expanduser() if self.general.output_dir else default_data_dir()
+
+    @property
+    def reports_dir(self) -> Path:
+        return Path(self.report.directory).expanduser() if self.report.directory else default_reports_dir()
+
+    @property
+    def work_dir(self) -> Path:
+        return default_work_dir()
+
+    # -- secret resolution ------------------------------------------------
+    def resolve_secret(self, value: str, command: str, env_var: str) -> str:
+        """Environment variable > helper command > literal config value."""
+        from_env = os.environ.get(env_var)
+        if from_env:
+            return from_env
+        if command:
+            try:
+                proc = subprocess.run(
+                    shlex.split(command),
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                if proc.returncode == 0:
+                    return proc.stdout.strip()
+                log.warning("secret command %r failed with %s", command, proc.returncode)
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.warning("secret command %r failed: %s", command, exc)
+        return value
+
+    def smtp_password(self) -> str:
+        return self.resolve_secret(
+            self.email.password, self.email.password_command, "DCS_SMTP_PASSWORD"
+        )
+
+    def smtp_username(self) -> str:
+        return os.environ.get("DCS_SMTP_USERNAME") or self.email.username
+
+    def gofile_token(self) -> str:
+        return self.resolve_secret(
+            self.upload.gofile.token, self.upload.gofile.token_command, "DCS_GOFILE_TOKEN"
+        )
+
+    def pixeldrain_api_key(self) -> str:
+        return self.resolve_secret(
+            self.upload.pixeldrain.api_key,
+            self.upload.pixeldrain.api_key_command,
+            "DCS_PIXELDRAIN_API_KEY",
+        )
+
+    # -- serialisation ----------------------------------------------------
+    def to_dict(self, *, mask_secrets: bool = False) -> dict[str, Any]:
+        data = asdict(self)
+        data.pop("source_path", None)
+        if mask_secrets:
+            data["email"]["password"] = "***" if data["email"]["password"] else ""
+            data["upload"]["gofile"]["token"] = "***" if data["upload"]["gofile"]["token"] else ""
+            data["upload"]["pixeldrain"]["api_key"] = (
+                "***" if data["upload"]["pixeldrain"]["api_key"] else ""
+            )
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AppConfig:
+        return _build(cls, data or {})
+
+    def merge(self, data: dict[str, Any]) -> None:
+        """Overlay a (partial) dict, e.g. from a higher priority config file."""
+        _overlay(self, data or {})
+
+    def save(self, path: str | os.PathLike[str] | None = None, *, include_secrets: bool = True) -> str:
+        target = Path(path) if path else (Path(self.source_path) if self.source_path else default_config_path())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = "# Ducky Can Shoot configuration\n# generated " + str(len(asdict(self))) + " keys\n"
+        payload = self.to_dict(mask_secrets=not include_secrets)
+        text += dumps_toml(payload)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
+        self.source_path = str(target)
+        return str(target)
+
+    def validation_problems(self) -> list[str]:
+        """Human readable list of things that will break a run."""
+        problems: list[str] = []
+        if self.scan.engines:
+            unknown = [e for e in self.scan.engines if e not in ("clamav", "heuristic")]
+            if unknown:
+                problems.append(f"unknown scan engine(s): {', '.join(unknown)}")
+        if not self.scan.engines:
+            problems.append("no scan engine enabled: enable 'clamav' and/or 'heuristic'")
+        if self.archive.format not in ("zip", "7z"):
+            problems.append(f"archive.format must be zip or 7z, not {self.archive.format!r}")
+        if self.archive.when not in ("clean", "always", "never"):
+            problems.append(f"archive.when must be clean/always/never, not {self.archive.when!r}")
+        if self.report.format not in ("html", "text", "both"):
+            problems.append(f"report.format must be html, text or both, not {self.report.format!r}")
+        if self.upload.upload_when not in ("clean", "always", "never"):
+            problems.append(f"upload.upload_when must be clean/always/never, not {self.upload.upload_when!r}")
+        if self.email.enabled:
+            if not self.email.smtp_host:
+                problems.append("email.enabled is true but email.smtp_host is empty")
+            if not self.email.from_addr:
+                problems.append("email.enabled is true but email.from_addr is empty")
+            if not (self.email.to_addrs or self.email.cc_addrs or self.email.bcc_addrs):
+                problems.append("email.enabled is true but no recipient is configured")
+            if self.email.security not in ("starttls", "ssl", "none", "plain"):
+                problems.append(f"email.security must be starttls/ssl/none, not {self.email.security!r}")
+        return problems
+
+
+# ---------------------------------------------------------------------------
+# generic dataclass <-> dict plumbing
+# ---------------------------------------------------------------------------
+
+
+def _build(cls: type, data: dict[str, Any]) -> Any:
+    """Instantiate a (nested) dataclass from a plain dict, ignoring unknowns."""
+    if not is_dataclass(cls):
+        return data
+    kwargs: dict[str, Any] = {}
+    known = {f.name: f for f in fields(cls)}
+    for key, value in data.items():
+        spec = known.get(key)
+        if spec is None:
+            log.debug("ignoring unknown config key %s.%s", cls.__name__, key)
+            continue
+        kwargs[key] = _coerce(spec.type, value)
+    try:
+        return cls(**kwargs)
+    except TypeError as exc:  # pragma: no cover - defensive
+        log.error("invalid config for %s: %s", cls.__name__, exc)
+        return cls()
+
+
+def _coerce(annotation: Any, value: Any) -> Any:
+    if isinstance(annotation, str):  # postponed annotations
+        annotation = _RESOLVE.get(annotation, annotation)
+    if is_dataclass(annotation) and isinstance(value, dict):
+        return _build(annotation, value)
+    origin = get_origin(annotation)
+    if origin is list and isinstance(value, list):
+        args = [a for a in get_args(annotation) if a is not Ellipsis]
+        if args and is_dataclass(args[0]):
+            return [_build(args[0], item) for item in value if isinstance(item, dict)]
+        return list(value)
+    if annotation is bool and not isinstance(value, bool):
+        return str(value).strip().lower() in ("1", "true", "yes", "on")
+    if annotation is int and isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if annotation is float and isinstance(value, (int, str)):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _overlay(target: Any, data: dict[str, Any]) -> None:
+    """Recursively apply a partial dict onto an existing dataclass instance."""
+    for key, value in data.items():
+        if not hasattr(target, key):
+            log.debug("ignoring unknown config key %s", key)
+            continue
+        current = getattr(target, key)
+        if is_dataclass(current) and isinstance(value, dict):
+            _overlay(current, value)
+        else:
+            setattr(target, key, _coerce(type(current) if current is not None else str, value))
+
+
+#: small map so postponed string annotations can be resolved when needed
+_RESOLVE: dict[str, Any] = {
+    "GeneralConfig": GeneralConfig,
+    "ClamAVConfig": ClamAVConfig,
+    "ScanConfig": ScanConfig,
+    "ArchiveConfig": ArchiveConfig,
+    "GofileConfig": GofileConfig,
+    "PixeldrainConfig": PixeldrainConfig,
+    "SimpleHostConfig": SimpleHostConfig,
+    "UploadConfig": UploadConfig,
+    "EmailConfig": EmailConfig,
+    "ReportConfig": ReportConfig,
+    "GuiConfig": GuiConfig,
+}
+
+
+def dumps_toml(data: dict[str, Any]) -> str:
+    """Minimal TOML writer for the config shape (no dependency required)."""
+    lines: list[str] = []
+
+    def scalar(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return repr(value)
+        if isinstance(value, str):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            return f'"{escaped}"'
+        if value is None:
+            return '""'
+        return f'"{value}"'
+
+    def emit(section: dict[str, Any], prefix: str) -> None:
+        simple = {k: v for k, v in section.items() if not isinstance(v, dict)}
+        nested = {k: v for k, v in section.items() if isinstance(v, dict)}
+        if prefix and (simple or not nested):
+            lines.append(f"[{prefix}]")
+        for key, value in simple.items():
+            if isinstance(value, list):
+                if not value:
+                    lines.append(f"{key} = []")
+                elif all(isinstance(v, (str, int, float, bool)) for v in value):
+                    lines.append(f"{key} = [" + ", ".join(scalar(v) for v in value) + "]")
+                else:  # pragma: no cover - not used by the current schema
+                    lines.append(f"{key} = []")
+            else:
+                lines.append(f"{key} = {scalar(value)}")
+        if simple and nested:
+            lines.append("")
+        for key, value in nested.items():
+            emit(value, f"{prefix}.{key}" if prefix else key)
+            lines.append("")
+
+    emit(data, "")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# ---------------------------------------------------------------------------
+# loading
+# ---------------------------------------------------------------------------
+
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    try:
+        with open(path, "rb") as handle:
+            return tomllib.load(handle)
+    except FileNotFoundError:
+        return {}
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        log.error("cannot read %s: %s", path, exc)
+        return {}
+
+
+def load_config(
+    path: str | os.PathLike[str] | None = None,
+    *,
+    system_path: str | os.PathLike[str] | None = SYSTEM_CONFIG,
+) -> AppConfig:
+    """Load the layered configuration.
+
+    *path* (when given) replaces the per-user file and becomes the save
+    target, which is what the CLI --config option and the GUI settings page
+    both want.
+    """
+    config = AppConfig()
+
+    if system_path and Path(system_path).exists():
+        config.merge(_read_toml(Path(system_path)))
+
+    candidate = Path(path) if path else default_config_path()
+    expanded = candidate.expanduser()
+    if expanded.exists():
+        config.merge(_read_toml(expanded))
+    elif path:
+        log.warning("config file %s does not exist, using defaults", expanded)
+
+    config.source_path = str(expanded)
+
+    # environment overrides for a few high value keys
+    env_map = {
+        "DCS_PROVIDER": ("upload", "provider"),
+        "DCS_UPLOAD_WHEN": ("upload", "upload_when"),
+        "DCS_SMTP_HOST": ("email", "smtp_host"),
+        "DCS_SMTP_PORT": ("email", "smtp_port"),
+        "DCS_SMTP_FROM": ("email", "from_addr"),
+        "DCS_SMTP_TO": ("email", "to_addrs"),
+        "DCS_ENGINES": ("scan", "engines"),
+        "DCS_ARCHIVE_DIR": ("general", "output_dir"),
+        "DCS_REPORT_DIR": ("report", "directory"),
+    }
+    for env_var, (section, key) in env_map.items():
+        raw = os.environ.get(env_var)
+        if not raw:
+            continue
+        section_obj = getattr(config, section)
+        if key in ("to_addrs", "engines"):
+            values = [part.strip() for part in raw.split(",") if part.strip()]
+            setattr(section_obj, key, values)
+        elif key == "smtp_port":
+            try:
+                setattr(section_obj, key, int(raw))
+            except ValueError:
+                log.warning("ignoring non numeric %s=%r", env_var, raw)
+        else:
+            setattr(section_obj, key, raw)
+
+    return config
+
+
+def write_default_config(path: str | os.PathLike[str] | None = None) -> str:
+    """Write a commented example config if none exists yet."""
+    target = Path(path).expanduser() if path else default_config_path()
+    if target.exists():
+        return str(target)
+    config = AppConfig()
+    config.source_path = str(target)
+    config.save(target)
+    return str(target)

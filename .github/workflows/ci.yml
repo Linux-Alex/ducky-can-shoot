@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-pyqt6 python3-pyqt6.qtqml python3-pyqt6.qtquick \
+            qml6-module-org-kde-kirigami qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \
+            libqt6svg6 zip p7zip-full
+
+      - name: Install the package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps -e .
+          python -m pip install pytest requests
+
+      - name: Lint
+        run: |
+          python -m pip install ruff
+          ruff check src tests
+
+      - name: Test (offscreen Qt)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: src
+        run: python -m pytest -q
+
+      - name: Smoke test the CLI
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m dcs version
+          python -m dcs providers
+          python -m dcs doctor --offline || true

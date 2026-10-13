@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Ducky Can Shoot: a shield (defence) with a USB plug inside (the medium) -->
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fb8ea"/>
+      <stop offset="1" stop-color="#1d7fb8"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fcfcfc"/>
+      <stop offset="1" stop-color="#c9ced3"/>
+    </linearGradient>
+  </defs>
+  <path d="M64 6 L112 22 V64 C112 92 92 112 64 122 C36 112 16 92 16 64 V22 Z"
+        fill="url(#shield)" stroke="#16648f" stroke-width="3"/>
+  <path d="M64 16 L102 29 V64 C102 87 86 103 64 112 C42 103 26 87 26 64 V29 Z"
+        fill="#ffffff" opacity="0.10"/>
+  <!-- USB connector body -->
+  <rect x="46" y="34" width="36" height="26" rx="4" fill="url(#metal)" stroke="#7a8288" stroke-width="2"/>
+  <rect x="52" y="41" width="24" height="12" rx="2" fill="#2b3136"/>
+  <circle cx="58" cy="47" r="2.4" fill="#fcfcfc"/>
+  <rect x="66" y="45" width="8" height="4" rx="1" fill="#fcfcfc"/>
+  <!-- cable -->
+  <path d="M64 60 V78" stroke="#7a8288" stroke-width="6" stroke-linecap="round"/>
+  <!-- padlock shackle hint: the scan result is locked in -->
+  <path d="M50 84 h28 a6 6 0 0 1 6 6 v16 a6 6 0 0 1 -6 6 h-28 a6 6 0 0 1 -6 -6 v-16 a6 6 0 0 1 6 -6 z"
+        fill="url(#metal)" stroke="#7a8288" stroke-width="2"/>
+  <path d="M56 84 v-6 a8 8 0 0 1 16 0 v6" fill="none" stroke="#e6e9ec" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="64" cy="96" r="3.4" fill="#2b3136"/>
+  <rect x="62.4" y="96" width="3.2" height="7" rx="1.6" fill="#2b3136"/>
+</svg>

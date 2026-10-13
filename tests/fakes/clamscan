@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""A stand-in for clamscan used by the DCS test suite.
+
+It implements just enough CLI surface for dcs.core.scanner.clamav:
+--version, --file-list=FILE, --verbose, --no-summary.  Results are derived
+from the file names so that the tests can ask for any outcome:
+
+    *eicar*   -> <name>: Eicar-Test-Signature FOUND  (exit code 1)
+    *pua*     -> <name>: PUA.Win.Tool.Fake FOUND     (exit code 1)
+    *lockme*  -> <name>: Access denied ERROR
+    anything  -> <name>: OK
+"""
+
+import os
+import sys
+
+VERSION = "ClamAV 1.5.4-fake/27000/Tue Jan  1 00:00:00 2026"
+
+
+def main(argv: list[str]) -> int:
+    if "--version" in argv or "-V" in argv:
+        print(VERSION)
+        return 0
+    if "--ping" in argv or "--ping=1" in argv:
+        return 0
+
+    paths: list[str] = []
+    for index, arg in enumerate(argv):
+        if arg.startswith("--file-list="):
+            value = arg.split("=", 1)[1]
+        elif arg == "--file-list":
+            value = argv[index + 1]
+        else:
+            continue
+        if value == "-":
+            paths = [line.strip() for line in sys.stdin if line.strip()]
+        else:
+            with open(value, encoding="utf-8", errors="surrogateescape") as handle:
+                paths = [line.strip() for line in handle if line.strip()]
+        break
+
+    infected = False
+    for path in paths:
+        name = os.path.basename(path).lower()
+        if "eicar" in name:
+            print(f"{path}: Eicar-Test-Signature FOUND")
+            infected = True
+        elif "pua" in name:
+            print(f"{path}: PUA.Win.Tool.Fake FOUND")
+            infected = True
+        elif "lockme" in name:
+            print(f"{path}: Access denied ERROR")
+        else:
+            print(f"{path}: OK")
+    print("----------- SCAN SUMMARY -----------")
+    print(f"Infected files: {1 if infected else 0}")
+    return 1 if infected else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

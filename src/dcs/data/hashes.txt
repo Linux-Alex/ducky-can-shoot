@@ -1,0 +1,7 @@
+# DCS known-hash block list
+# One entry per line: <sha256> <threat name>
+# Lines starting with # are ignored.  Extend it with anything you meet in the
+# field; the heuristic engine matches full-file SHA-256 digests.
+#
+# EICAR anti malware test file (harmless, used to verify a scanner works)
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f EICAR-AV-Test-File
