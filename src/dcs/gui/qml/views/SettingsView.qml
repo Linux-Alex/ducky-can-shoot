@@ -610,6 +610,25 @@ Controls.ScrollView {
                         text: view.reportDir
                         onTextEdited: view.reportDir = text
                     }
+
+                    RowLayout {
+                        Kirigami.FormData.label: "Files:"
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Controls.Button {
+                            text: "Open config file"
+                            icon.name: "document-open"
+                            onClicked: backend.openConfig()
+                        }
+
+                        Controls.Button {
+                            text: "Open report folder"
+                            icon.name: "folder-open"
+                            onClicked: backend.openPath(backend.settings.report.directory !== ""
+                                                        ? backend.settings.report.directory
+                                                        : "")
+                        }
+                    }
                 }
             }
         }

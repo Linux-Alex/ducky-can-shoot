@@ -100,6 +100,28 @@ def remember_window_geometry(app: QGuiApplication, window: Any, backend: Backend
     app.aboutToQuit.connect(store)
 
 
+def installed_desktop_file(app_id: str) -> str:
+    """Path of the installed .desktop file for *app_id*, or an empty string.
+
+    Qt asks the desktop portal to register the application id, and the portal
+    answers "App info not found" when no .desktop file matches.  Running from a
+    source checkout that is always the case, so the id is only set when the file
+    is really installed (scripts/install.sh puts it in place).
+    """
+    file_name = f"{app_id}.desktop"
+    locations = [os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")]
+    locations.extend(
+        part
+        for part in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep)
+        if part
+    )
+    for base in locations:
+        candidate = os.path.join(base, "applications", file_name)
+        if os.path.exists(candidate):
+            return candidate
+    return ""
+
+
 def run_gui(argv: list[str] | None = None, *, config: AppConfig | None = None) -> int:
     """Entry point used by the dcs-gui script and by 'dcs' without arguments."""
     argv = list(argv or sys.argv)
@@ -113,7 +135,20 @@ def run_gui(argv: list[str] | None = None, *, config: AppConfig | None = None) -
         QGuiApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 
     app = QGuiApplication(argv)
-    app.setDesktopFileName(APP_ID)
+
+    # Only claim a desktop file when one is installed: otherwise the desktop
+    # portal answers "Could not register app ID: App info not found", which is
+    # what happens when the interface is started from a source checkout.
+    desktop_file = installed_desktop_file(APP_ID)
+    if desktop_file:
+        app.setDesktopFileName(APP_ID)
+        log.debug("registered as %s (%s)", APP_ID, desktop_file)
+    else:
+        log.debug(
+            "no %s.desktop found; skipping desktop portal registration "
+            "(scripts/install.sh installs one)",
+            APP_ID,
+        )
 
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "icons", "dcs.svg")
     if os.path.exists(icon_path):

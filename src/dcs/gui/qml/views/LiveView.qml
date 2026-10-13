@@ -88,18 +88,10 @@ Controls.ScrollView {
                     }
                 }
 
-                Controls.ProgressBar {
+                DcsProgressBar {
                     Layout.fillWidth: true
-                    from: 0
-                    to: 1
                     value: backend.overallPercent
-
-                    Behavior on value {
-                        NumberAnimation {
-                            duration: 160
-                            easing.type: Easing.OutCubic
-                        }
-                    }
+                    indeterminate: backend.state === "running" && backend.overallPercent <= 0.001
                 }
 
                 Controls.Label {
@@ -261,7 +253,9 @@ Controls.ScrollView {
                     model: backend.stages
 
                     delegate: StageDelegate {
-                        width: parent ? parent.width : implicitWidth
+                        // the layout owns the width: an explicit width binding
+                        // here fights ColumnLayout and collapses the row
+                        Layout.fillWidth: true
                     }
                 }
             }

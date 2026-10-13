@@ -38,10 +38,22 @@ Item {
         return hours > 0 ? hours + ":" + pad(minutes) + ":" + pad(secs) : pad(minutes) + ":" + pad(secs);
     }
 
+    function formatRate(bytesPerSecond) {
+        const units = ["B", "KiB", "MiB", "GiB"];
+        let value = bytesPerSecond;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+            value /= 1024;
+            ++unit;
+        }
+        return (Math.round(value * 10) / 10) + " " + units[unit] + "/s";
+    }
+
     StageRow {
         id: row
         anchors.left: parent.left
         anchors.right: parent.right
+        anchors.top: parent.top
         stageId: wrapper.stageId
         title: wrapper.title
         description: wrapper.description
@@ -52,18 +64,7 @@ Item {
         current: wrapper.current
         elapsedText: wrapper.formatDuration(wrapper.elapsed)
         etaText: wrapper.eta >= 0 ? wrapper.formatDuration(wrapper.eta) : ""
-        rateText: wrapper.rate > 0 ? formatRate(wrapper.rate) : ""
+        rateText: wrapper.rate > 0 ? wrapper.formatRate(wrapper.rate) : ""
         stageIndex: wrapper.stageIndex
-
-        function formatRate(bytesPerSecond) {
-            const units = ["B", "KiB", "MiB", "GiB"];
-            let value = bytesPerSecond;
-            let unit = 0;
-            while (value >= 1024 && unit < units.length - 1) {
-                value /= 1024;
-                ++unit;
-            }
-            return (Math.round(value * 10) / 10) + " " + units[unit] + "/s";
-        }
     }
 }

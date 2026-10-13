@@ -335,6 +335,68 @@ class FindingsModel(QAbstractListModel):
             self.severeFindingAdded.emit(row["severity"], row["threat"])
 
 
+class TextLinesModel(QAbstractListModel):
+    """A capped list of plain text lines, for streamed command output.
+
+    A ListView over this model gives the installation dialog real scrolling and
+    a scrollbar, and positionViewAtEnd() keeps the newest line visible, which is
+    what somebody watching apt work actually wants to see.
+    """
+
+    TextRole = Qt.ItemDataRole.UserRole + 1
+
+    countChanged = pyqtSignal()
+
+    def __init__(self, parent: Any = None, *, max_lines: int = 4000) -> None:
+        super().__init__(parent)
+        self._rows: list[str] = []
+        self.max_lines = max_lines
+
+    def roleNames(self) -> dict[int, bytes]:
+        return {self.TextRole: b"line"}
+
+    def rowCount(self, parent: QModelIndex | None = None) -> int:
+        return len(self._rows)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        if not index.isValid() or not (0 <= index.row() < len(self._rows)):
+            return None
+        if role in (self.TextRole, Qt.ItemDataRole.DisplayRole):
+            return self._rows[index.row()]
+        return None
+
+    @pyqtProperty(int, notify=countChanged)
+    def count(self) -> int:
+        return len(self._rows)
+
+    @pyqtSlot(str)
+    def append(self, text: str) -> None:
+        if len(self._rows) >= self.max_lines:
+            self.beginRemoveRows(QModelIndex(), 0, 0)
+            self._rows.pop(0)
+            self.endRemoveRows()
+        position = len(self._rows)
+        self.beginInsertRows(QModelIndex(), position, position)
+        self._rows.append(text)
+        self.endInsertRows()
+        self.countChanged.emit()
+
+    @pyqtSlot()
+    def clear(self) -> None:
+        self.beginResetModel()
+        self._rows = []
+        self.endResetModel()
+        self.countChanged.emit()
+
+    @pyqtSlot(result=str)
+    def as_text(self) -> str:
+        return "\n".join(self._rows)
+
+    @pyqtProperty(str, notify=countChanged)
+    def text(self) -> str:
+        return "\n".join(self._rows)
+
+
 class LogModel(QAbstractListModel):
     """The log tail shown in the collapsible pane."""
 

@@ -41,6 +41,7 @@ from dcs.gui.models import (
     FindingsModel,
     LogModel,
     StagesModel,
+    TextLinesModel,
     ThroughputModel,
 )
 from dcs.gui.worker import PipelineWorker
@@ -87,9 +88,11 @@ class Backend(QObject):
     busyChanged = pyqtSignal()
     toast = pyqtSignal(str, str)  # level, message
     testResult = pyqtSignal(str, bool, str)  # what, ok, message
-    installTextChanged = pyqtSignal()
     installStateChanged = pyqtSignal()
     installFinished = pyqtSignal(object)
+    #: emitted from the installer thread; the model lives in the GUI thread, so
+    #: Qt delivers these as queued calls and the model is only touched there
+    installLineReady = pyqtSignal(str)
 
     def __init__(
         self,
@@ -105,10 +108,16 @@ class Backend(QObject):
         self.findings_model = FindingsModel(self)
         self.log_model = LogModel(self)
         self.throughput_model = ThroughputModel(self)
+        self.install_model = TextLinesModel(self)
+        self.installLineReady.connect(self.install_model.append)
 
         self._state = IDLE
         self._busy = False
         self._progress: dict[str, Any] = {}
+        #: last progress event per stage: the headline tiles must keep showing the
+        #: scan numbers while a later stage (the upload, which has no file count)
+        #: is the one currently reporting
+        self._progress_by_stage: dict[str, dict[str, Any]] = {}
         self._summary: dict[str, Any] = {}
         self._selected_row = -1
         self._selected_folder = ""
@@ -121,15 +130,8 @@ class Backend(QObject):
         self._runners: list[AsyncRunner] = []
         self._installer: Installer | None = None
         self._install_thread: threading.Thread | None = None
-        self._install_lines: list[str] = []
         self._install_state = "idle"
         self._install_outcome: dict[str, Any] = {}
-        self._install_dirty = False
-        # one update per 100 ms keeps a fast moving apt log cheap for QML
-        self._install_timer = QTimer(self)
-        self._install_timer.setInterval(100)
-        self._install_timer.timeout.connect(self._flush_install_text)
-        self._install_timer.start()
 
         log_ring().add_listener(self._on_log_record)
         self.refreshDevices()
@@ -233,6 +235,13 @@ class Backend(QObject):
         value = self._progress.get(key)
         return str(value) if value not in (None, "") else fallback
 
+    def _scan_progress(self) -> dict[str, Any]:
+        """The last progress event of the scan stage, which owns the counters."""
+        return self._progress_by_stage.get("scan", {})
+
+    def _finished_summary(self) -> dict[str, Any]:
+        return self._summary if self._state in (FINISHED, FAILED) else {}
+
     @pyqtProperty(str, notify=stateChanged)
     def liveStageTitle(self) -> str:
         return self._live("title", "Waiting")
@@ -243,7 +252,23 @@ class Backend(QObject):
 
     @pyqtProperty(str, notify=stateChanged)
     def liveRateText(self) -> str:
-        return self._live("rateText", "-")
+        from dcs.core.util import human_rate
+
+        if self._state == RUNNING and (self._progress.get("rate") or 0) > 0:
+            return self._live("rateText", "-")
+        # once the job is over the instantaneous rate is gone, but the average
+        # over the scan is still meaningful
+        summary = self._finished_summary()
+        if summary:
+            stats = ((summary.get("scan") or {}).get("stats") or {})
+            duration = float(stats.get("duration") or 0.0)
+            scanned = float(summary.get("bytesScanned") or 0)
+            if duration > 0 and scanned > 0:
+                return human_rate(scanned / duration)
+        scan = self._scan_progress()
+        if (scan.get("rate") or 0) > 0:
+            return str(scan.get("rateText") or "-")
+        return "-"
 
     @pyqtProperty(str, notify=stateChanged)
     def liveEtaText(self) -> str:
@@ -251,21 +276,36 @@ class Backend(QObject):
 
     @pyqtProperty(str, notify=stateChanged)
     def liveElapsedText(self) -> str:
-        return self._live("elapsedText", "00:00")
+        summary = self._finished_summary()
+        if summary:
+            return str(summary.get("durationText") or "-")
+        scan = self._scan_progress()
+        return str(scan.get("elapsedText") or self._live("elapsedText", "00:00"))
 
     @pyqtProperty(str, notify=stateChanged)
     def liveFilesText(self) -> str:
-        processed = self._progress.get("processed") or 0
-        total = self._progress.get("total") or 0
-        if not total:
-            # stages such as the upload have no file count, only bytes
-            return f"{processed:,}" if processed else "-"
-        return f"{processed:,} / {total:,}"
+        summary = self._finished_summary()
+        if summary:
+            return f"{int(summary.get('filesScanned') or 0):,}"
+        scan = self._scan_progress()
+        total = int(scan.get("total") or 0)
+        processed = int(scan.get("processed") or 0)
+        if total:
+            return f"{processed:,} / {total:,}"
+        if processed:
+            return f"{processed:,}"
+        # the upload reports bytes only, and before the first scan event there is
+        # simply nothing to count yet
+        return "0" if self._state == RUNNING else "-"
 
     @pyqtProperty(str, notify=stateChanged)
     def liveBytesText(self) -> str:
-        done = self._live("bytesProcessedText", "0 B")
-        total = self._live("bytesTotalText")
+        summary = self._finished_summary()
+        if summary:
+            return str(summary.get("bytesScannedText") or "-")
+        scan = self._scan_progress()
+        done = str(scan.get("bytesProcessedText") or self._live("bytesProcessedText", "0 B"))
+        total = str(scan.get("bytesTotalText") or self._live("bytesTotalText") or "")
         return f"{done} / {total}" if total and total != "0 B" else done
 
     @pyqtProperty(str, notify=stateChanged)
@@ -455,6 +495,8 @@ class Backend(QObject):
         self.stages_model.reset_stages()
         self.findings_model.clear()
         self.throughput_model.clear()
+        self._progress = {}
+        self._progress_by_stage = {}
         self._summary = {}
         self._overall = 0.0
         self._set_state(RUNNING)
@@ -491,6 +533,9 @@ class Backend(QObject):
     def _on_progress(self, payload: Any) -> None:
         if isinstance(payload, dict):
             self._progress = payload
+            stage = str(payload.get("stage", ""))
+            if stage:
+                self._progress_by_stage[stage] = payload
             self.stages_model.apply_progress(payload)
             self.throughput_model.append(payload)
             index = 0
@@ -643,9 +688,14 @@ class Backend(QObject):
     def installRunning(self) -> bool:
         return self._install_state == "running"
 
-    @pyqtProperty(str, notify=installTextChanged)
+    @pyqtProperty(QObject, constant=True)
+    def installOutput(self) -> TextLinesModel:
+        """The streamed installation output, one row per line."""
+        return self.install_model
+
+    @pyqtProperty(str, notify=installStateChanged)
     def installText(self) -> str:
-        return "\n".join(self._install_lines)
+        return self.install_model.text
 
     @pyqtProperty("QVariantMap", notify=installStateChanged)
     def installOutcome(self) -> dict[str, Any]:
@@ -673,13 +723,13 @@ class Backend(QObject):
         plan = build_plan(config=self.config.scan.clamav)
         if not plan.possible:
             self.toast.emit("error", plan.blocker or "nothing to install on this system")
-            self._install_lines = []
+            self.install_model.clear()
             self._append_install(
                 manual_instructions(plan) if plan.steps else (plan.blocker or "no plan available")
             )
             return
 
-        self._install_lines = []
+        self.install_model.clear()
         self._install_outcome = {}
         self._append_install(f"# {plan.distro} - {plan.manager.label if plan.manager else ''}")
         self._append_install(f"# {plan.method_label}")
@@ -730,18 +780,9 @@ class Backend(QObject):
         self._set_install_state("done" if status.get("available") else self._install_state)
 
     def _append_install(self, line: str) -> None:
-        self._install_lines.append(line)
-        if len(self._install_lines) > 4000:
-            del self._install_lines[:500]
-        self._install_dirty = True
-
-    def _flush_install_text(self) -> None:
-        if self._install_dirty:
-            self._install_dirty = False
-            self.installTextChanged.emit()
+        """Called from the installer thread; the signal queues it to the GUI."""
+        self.installLineReady.emit(line)
 
     def _set_install_state(self, state: str) -> None:
         self._install_state = state
-        self._install_dirty = True
         self.installStateChanged.emit()
-        self.installTextChanged.emit()

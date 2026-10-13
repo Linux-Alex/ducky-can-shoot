@@ -25,6 +25,27 @@ change between minor releases; each such change is listed below.
 
 ### Fixed
 
+- **The live view is usable again.** The pipeline rows derived their height from
+  a layout that was anchored with anchors.fill, a binding loop that Qt resolved
+  by collapsing every row onto the same position, so the seven stage rows (and
+  every label and progress bar in them) were drawn on top of each other.
+- **The headline tiles show numbers instead of dashes.** They reported the last
+  progress event of whichever stage was running, and an upload has no file
+  count, so "Files inspected" and "Rate" turned into "-". The tiles now read the
+  scan stage and, once the job is over, the final summary (with the average rate).
+- **The ClamAV installation log scrolls and follows the tail.** It is a list
+  view now, so the scrollbar works, new lines keep the newest line visible, and
+  scrolling up pauses the follow until you return to the end.
+- No more "Cannot read property 'top' of null" from the Breeze style: DCS draws
+  its own progress bar instead of using the QtQuick Controls one, whose style
+  implementation logs those errors while it builds its segments.
+- No more "Binding loop detected" for the Kirigami drawer handle, and no more
+  "Could not register app ID" from the desktop portal: the global drawer is gone
+  (the tab bar already carries every destination, and the drawer added a
+  hamburger row above it) and the desktop file id is only claimed when a
+  .desktop file is actually installed.
+- Delegate widths in the layouts use Layout.fillWidth instead of binding width
+  to the parent, which is what a ColumnLayout needs.
 - Cancelling an installation (or a job) now stops the whole process group and no
   longer waits for the next line of output to notice.
 - `config`: a value that cannot be converted to its field type is ignored with a

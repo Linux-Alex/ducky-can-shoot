@@ -8,7 +8,9 @@ QApplication exists.
 
 from __future__ import annotations
 
+import itertools
 import os
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -20,7 +22,7 @@ pytest.importorskip("PyQt6.QtQml", reason="PyQt6 QtQml is not installed")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QLibraryInfo, QModelIndex
+from PyQt6.QtCore import Q_ARG, QLibraryInfo, QModelIndex
 
 _PLATFORM_PLUGINS = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)) / "platforms"
 if not list(_PLATFORM_PLUGINS.glob("*offscreen*")):
@@ -459,17 +461,70 @@ def test_backend_progress_updates_the_live_values(backend: Backend, qapp: Any) -
     assert backend.liveCurrent == "/tmp/image.zip"
     assert backend.livePercent == pytest.approx(0.25)
     assert backend.liveRate == pytest.approx(512.0)
-    assert backend.liveFilesText == "1,024 / 4,096"
-    assert backend.liveBytesText == "1.0 KiB / 4.0 KiB"
     assert backend.liveMessage == "1.0 KiB of 4.0 KiB sent"
     assert backend.liveEtaText == "00:06"
-    assert backend.liveElapsedText == "00:02"
+    # an upload has no file count, so the "Files inspected" tile must not borrow
+    # the upload byte counters: it reports the scan, which has not run here yet
+    assert backend.liveFilesText == "-"
+    assert backend.liveBytesText == "1.0 KiB / 4.0 KiB"
     assert changed  # stateChanged drives every live property
     # the overall bar is the stage index plus the stage fraction
     expected = (list(STAGE_ORDER).index(Stage.UPLOAD) + 0.25) / len(STAGE_ORDER)
     assert backend.overallPercent == pytest.approx(expected)
     assert backend.stageRow(4)["state"] == "running"
     assert backend.throughput_model.rowCount() == 1
+
+
+def test_live_tiles_keep_reporting_the_scan_while_a_later_stage_runs(
+    backend: Backend, qapp: Any
+) -> None:
+    """The scan numbers survive the archive and upload stages.
+
+    Regression test for the tiles that showed "-" as soon as the upload (which
+    reports bytes, not files) became the active stage.
+    """
+    scan = StageProgress(
+        stage=Stage.SCAN,
+        processed=120,
+        total=500,
+        bytes_processed=120 * 1024,
+        bytes_total=500 * 1024,
+        current="/media/usb/file.bin",
+        rate=1024 * 1024,
+        elapsed=12.0,
+        percent=0.24,
+    )
+    backend._state = "running"
+    backend._on_progress(scan.to_dict())
+    assert backend.liveFilesText == "120 / 500"
+    assert backend.liveBytesText == "120.0 KiB / 500.0 KiB"
+    assert backend.liveRateText != "-"
+
+    upload = StageProgress(
+        stage=Stage.UPLOAD,
+        bytes_processed=64 * 1024,
+        bytes_total=500 * 1024,
+        current="/tmp/image.zip",
+        percent=0.5,
+    )
+    backend._on_progress(upload.to_dict())
+    # the headline still describes the upload, but the tiles keep the scan values
+    assert backend.liveStageTitle == STAGE_TITLES[Stage.UPLOAD]
+    assert backend.liveFilesText == "120 / 500"
+    assert backend.liveBytesText == "120.0 KiB / 500.0 KiB"
+
+    backend._state = "finished"
+    backend._summary = {
+        "filesScanned": 500,
+        "bytesScannedText": "500.0 KiB",
+        "bytesScanned": 500 * 1024,
+        "durationText": "00:25",
+        "scan": {"stats": {"duration": 20.0}},
+    }
+    assert backend.liveFilesText == "500"
+    assert backend.liveBytesText == "500.0 KiB"
+    assert backend.liveRateText == "25.0 KiB/s"  # average over the scan
+    assert backend.liveElapsedText == "00:25"
 
 
 # ---------------------------------------------------------------------------
@@ -531,3 +586,47 @@ def test_qml_directory_and_import_paths_exist() -> None:
     assert paths[0] == str(directory)
     assert len(paths) == len(set(paths))
     assert all(isinstance(path, str) for path in paths)
+
+
+def test_stage_rows_are_laid_out_without_overlapping(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """The pipeline rows must each get their own vertical space.
+
+    Regression test for a binding loop: the row derived its implicitHeight from
+    a layout that was anchored with anchors.fill, and Qt resolved the loop by
+    collapsing every row onto the same y, so the whole pipeline was drawn on top
+    of itself.
+    """
+    from PyQt6.QtQuick import QQuickItem
+
+    engine, _ = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.setProperty("width", 1280)
+    window.setProperty("height", 950)
+    window.show()
+    window.metaObject().invokeMethod(window, "showTab", Q_ARG("QVariant", 1))
+    for _ in range(40):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    items: list[QQuickItem] = []
+
+    def walk(item: QQuickItem) -> None:
+        items.append(item)
+        for child in item.childItems():
+            walk(child)
+
+    walk(window.contentItem())
+    rows = [item for item in items if "StageDelegate" in item.metaObject().className()]
+    assert len(rows) == len(STAGE_ORDER), f"expected {len(STAGE_ORDER)} stage rows, got {len(rows)}"
+
+    geometry = sorted((round(row.y(), 1), round(row.height(), 1)) for row in rows)
+    ys = [y for y, _ in geometry]
+    heights = [height for _, height in geometry]
+    assert all(height > 20 for height in heights), f"collapsed rows: {geometry}"
+    assert ys == sorted(ys) and len(set(ys)) == len(ys), f"rows share a position: {geometry}"
+    for (y, height), (next_y, _) in itertools.pairwise(geometry):
+        assert y + height <= next_y + 1, f"rows overlap: {geometry}"
+
+    gui_app.teardown_engine(engine)

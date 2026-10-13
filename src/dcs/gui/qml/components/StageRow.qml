@@ -5,8 +5,12 @@ import org.kde.kirigami as Kirigami
 
 /*!
     One pipeline stage: state icon, title, live detail line and a progress bar.
-    The whole point of the live view is this row, so it animates its colour and
-    pulses while it is the active stage.
+
+    Layout note: the root item takes its height from the content column and the
+    column is anchored left/right/top only.  Anchoring the column with
+    anchors.fill while also deriving implicitHeight from it is a binding loop,
+    and Qt resolves it by collapsing the row, which stacks the rows on top of
+    each other.
 */
 Item {
     id: row
@@ -23,13 +27,9 @@ Item {
     property string etaText: ""
     property string rateText: ""
     property int stageIndex: 0
-    property int activeIndex: -1
-
-    implicitHeight: layout.implicitHeight + Kirigami.Units.largeSpacing
 
     readonly property bool isActive: state === "running"
     readonly property bool isDone: state === "done"
-    readonly property bool isProblem: state === "failed" || state === "cancelled"
     readonly property color stateColour: {
         if (isDone) {
             return Kirigami.Theme.positiveTextColor;
@@ -37,7 +37,7 @@ Item {
         if (state === "failed") {
             return Kirigami.Theme.negativeTextColor;
         }
-        if (state === "cancelled") {
+        if (state === "cancelled" || state === "skipped") {
             return Kirigami.Theme.neutralTextColor;
         }
         if (isActive) {
@@ -45,6 +45,9 @@ Item {
         }
         return Kirigami.Theme.disabledTextColor;
     }
+
+    implicitHeight: content.implicitHeight + Kirigami.Units.largeSpacing
+    implicitWidth: content.implicitWidth
 
     Rectangle {
         anchors.fill: parent
@@ -62,9 +65,13 @@ Item {
     }
 
     RowLayout {
-        id: layout
-        anchors.fill: parent
-        anchors.margins: Kirigami.Units.smallSpacing
+        id: content
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: Kirigami.Units.smallSpacing
+        anchors.rightMargin: Kirigami.Units.smallSpacing
+        anchors.topMargin: Kirigami.Units.smallSpacing
         spacing: Kirigami.Units.largeSpacing
 
         // state marker
@@ -161,18 +168,17 @@ Item {
                 Controls.Label {
                     text: row.title
                     font.weight: row.isActive ? Font.DemiBold : Font.Normal
-                    color: row.state === "pending" ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
+                    color: row.state === "pending" ? Kirigami.Theme.disabledTextColor
+                                                   : Kirigami.Theme.textColor
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
                 }
 
                 Controls.Label {
                     visible: row.state === "skipped"
-                    text: "(skipped)"
+                    text: "skipped"
                     font: Kirigami.Theme.smallFont
                     opacity: 0.6
-                }
-
-                Item {
-                    Layout.fillWidth: true
                 }
 
                 Controls.Label {
@@ -192,19 +198,12 @@ Item {
                 elide: Text.ElideRight
             }
 
-            Controls.ProgressBar {
+            DcsProgressBar {
                 Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing / 2
                 visible: row.isActive || row.isDone
-                from: 0
-                to: 1
                 value: row.percent
-
-                Behavior on value {
-                    NumberAnimation {
-                        duration: 180
-                        easing.type: Easing.OutCubic
-                    }
-                }
+                indeterminate: row.isActive && row.percent <= 0.01
             }
 
             RowLayout {
@@ -222,14 +221,14 @@ Item {
                 }
 
                 Controls.Label {
-                    visible: row.rateText !== "" && row.rateText !== "-"
+                    visible: row.rateText !== ""
                     text: row.rateText
                     font: Kirigami.Theme.smallFont
                     opacity: 0.7
                 }
 
                 Controls.Label {
-                    visible: row.etaText !== "" && row.etaText !== "--:--"
+                    visible: row.etaText !== ""
                     text: "ETA " + row.etaText
                     font: Kirigami.Theme.smallFont
                     opacity: 0.7

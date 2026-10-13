@@ -40,53 +40,9 @@ Kirigami.ApplicationWindow {
         toastPopup.show(message, level);
     }
 
-    globalDrawer: Kirigami.GlobalDrawer {
-        title: backend.appName
-        titleIcon: "drive-removable-media-usb"
-        isMenu: false
-        actions: [
-            Kirigami.Action {
-                text: "New job"
-                icon.name: "document-new"
-                onTriggered: root.showTab(0)
-            },
-            Kirigami.Action {
-                text: "Live progress"
-                icon.name: "view-statistics"
-                enabled: backend.state === "running" || backend.state === "finished"
-                onTriggered: root.showTab(1)
-            },
-            Kirigami.Action {
-                text: "Result"
-                icon.name: "dialog-ok-apply"
-                enabled: backend.state === "finished" || backend.state === "failed"
-                onTriggered: root.showTab(2)
-            },
-            Kirigami.Action {
-                text: "Settings"
-                icon.name: "settings-configure"
-                onTriggered: root.showTab(3)
-            },
-            Kirigami.Action {
-                text: "About"
-                icon.name: "help-about"
-                onTriggered: root.showTab(4)
-            },
-            Kirigami.Action {
-                separator: true
-            },
-            Kirigami.Action {
-                text: "Open config file"
-                icon.name: "document-open"
-                onTriggered: backend.openConfig()
-            },
-            Kirigami.Action {
-                text: "Open report folder"
-                icon.name: "folder-open"
-                onTriggered: backend.openPath(backend.summary.reports ? backend.summary.reports.html : "")
-            }
-        ]
-    }
+    // No global drawer on purpose: the tab bar below already carries every
+    // destination, and a Kirigami drawer adds a hamburger row (and its own
+    // DrawerHandle binding loop) that this window does not need.
 
     pageStack.initialPage: Kirigami.Page {
         id: dashboard
@@ -100,6 +56,9 @@ Kirigami.ApplicationWindow {
             Controls.TabBar {
                 id: tabs
                 Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
                 currentIndex: root.tabIndex
                 onCurrentIndexChanged: root.tabIndex = currentIndex
 
@@ -193,19 +152,11 @@ Kirigami.ApplicationWindow {
                 Layout.maximumWidth: root.width / 2
             }
 
-            Controls.ProgressBar {
+            DcsProgressBar {
                 Layout.fillWidth: true
-                from: 0
-                to: 1
-                value: backend.overallPercent
                 visible: backend.state !== "idle"
-
-                Behavior on value {
-                    NumberAnimation {
-                        duration: 150
-                        easing.type: Easing.OutCubic
-                    }
-                }
+                value: backend.overallPercent
+                indeterminate: backend.state === "running" && backend.overallPercent <= 0.001
             }
 
             Kirigami.ActionToolBar {

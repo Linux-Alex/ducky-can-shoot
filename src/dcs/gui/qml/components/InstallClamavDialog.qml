@@ -10,23 +10,33 @@ import org.kde.kirigami as Kirigami
     (a graphical polkit dialog) or to a terminal with sudo inside, and only the
     output of those is streamed back here.  Everything that will run is shown
     first, and can be copied instead of executed.
+
+    While it runs, the output is a ListView that follows the last line: apt
+    prints hundreds of lines and the interesting ones are always at the bottom.
+    Scrolling up is still possible (the view stops following as soon as the user
+    scrolls, and resumes when they return to the end).
 */
 Kirigami.Dialog {
     id: dialog
 
     objectName: "clamavInstallDialog"
     title: "Install ClamAV"
-    preferredWidth: Kirigami.Units.gridUnit * 40
-    preferredHeight: Kirigami.Units.gridUnit * 30
+    preferredWidth: Kirigami.Units.gridUnit * 42
+    preferredHeight: Kirigami.Units.gridUnit * 32
     padding: Kirigami.Units.largeSpacing
     showCloseButton: true
 
     property var plan: ({})
     property bool hasPlan: false
+    //: true while the user is reading history instead of the tail
+    readonly property bool following: outputList.atYEnd
 
     readonly property bool running: backend.installRunning
     readonly property var outcome: backend.installOutcome
     readonly property bool finished: backend.installState === "done" || backend.installState === "failed"
+    readonly property bool alreadyAvailable: plan.status !== undefined
+                                             && plan.status !== null
+                                             && plan.status.available === true
 
     function refresh() {
         plan = backend.clamavInstallPlan();
@@ -34,15 +44,6 @@ Kirigami.Dialog {
     }
 
     onOpened: refresh()
-
-    Connections {
-        target: backend
-        function onInstallStateChanged() {
-            if (backend.installState === "running" && !dialog.running) {
-                dialog.refresh();
-            }
-        }
-    }
 
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
@@ -55,10 +56,6 @@ Kirigami.Dialog {
         }
 
         // ---------------------------------------------------------- summary
-        Kirigami.Separator {
-            Layout.fillWidth: true
-        }
-
         GridLayout {
             Layout.fillWidth: true
             columns: 2
@@ -123,15 +120,16 @@ Kirigami.Dialog {
 
         Kirigami.InlineMessage {
             Layout.fillWidth: true
-            visible: dialog.plan.status !== undefined && dialog.plan.status.available === true
+            visible: dialog.alreadyAvailable && !dialog.running && !dialog.finished
             type: Kirigami.MessageType.Positive
-            text: "ClamAV is already available: " + ((dialog.plan.status && dialog.plan.status.line) || "")
+            text: "ClamAV is already available here: " + ((dialog.plan.status && dialog.plan.status.line) || "")
+                  + "  The plan below would reinstall or update it."
         }
 
         // ---------------------------------------------------------- steps
         Controls.Label {
             Layout.fillWidth: true
-            visible: !dialog.running && !dialog.finished
+            visible: dialog.plan.possible === true
             text: "These commands will run, in this order:"
             font.weight: Font.DemiBold
         }
@@ -139,7 +137,7 @@ Kirigami.Dialog {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing / 2
-            visible: !dialog.running && !dialog.finished
+            visible: dialog.plan.possible === true && !dialog.running && !dialog.finished
 
             Repeater {
                 model: dialog.plan.steps !== undefined ? dialog.plan.steps : []
@@ -153,7 +151,7 @@ Kirigami.Dialog {
 
                     Controls.Label {
                         Layout.alignment: Qt.AlignTop
-                        text: (stepRow.modelData.optional ? "optional" : "required")
+                        text: stepRow.modelData.optional ? "optional" : "required"
                         font: Kirigami.Theme.smallFont
                         opacity: 0.6
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 4.5
@@ -164,7 +162,9 @@ Kirigami.Dialog {
                         spacing: 0
 
                         Controls.Label {
+                            Layout.fillWidth: true
                             text: stepRow.modelData.title
+                            elide: Text.ElideRight
                         }
 
                         Controls.Label {
@@ -187,64 +187,75 @@ Kirigami.Dialog {
                 required property var modelData
 
                 Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
+                visible: !dialog.running
                 text: "- " + modelData
                 font: Kirigami.Theme.smallFont
                 opacity: 0.7
                 wrapMode: Text.WordWrap
-                visible: !dialog.running
             }
         }
 
         // ---------------------------------------------------------- output
-        Kirigami.Separator {
-            Layout.fillWidth: true
-            visible: dialog.running || dialog.finished
-        }
-
         RowLayout {
             Layout.fillWidth: true
             visible: dialog.running || dialog.finished
 
-            Controls.ProgressBar {
+            DcsProgressBar {
                 Layout.fillWidth: true
                 indeterminate: dialog.running
-                from: 0
-                to: 1
                 value: dialog.finished ? 1 : 0
             }
 
             Controls.Label {
-                text: dialog.running ? "Installing..." : (dialog.outcome.ok ? "Finished" : "Did not finish")
+                text: dialog.running ? "Installing..." : (dialog.outcome.ok === true ? "Finished" : "Did not finish")
                 font: Kirigami.Theme.smallFont
             }
+        }
+
+        Controls.Label {
+            Layout.fillWidth: true
+            visible: (dialog.running || dialog.finished) && !dialog.following
+            text: "You are reading the log from above; scroll to the end to follow the installation again."
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            wrapMode: Text.WordWrap
         }
 
         Controls.ScrollView {
             id: outputScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.minimumHeight: Kirigami.Units.gridUnit * 8
+            Layout.minimumHeight: Kirigami.Units.gridUnit * 9
             visible: dialog.running || dialog.finished
             clip: true
+            Controls.ScrollBar.vertical.policy: Controls.ScrollBar.AsNeeded
+            Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
 
-            Controls.TextArea {
-                id: outputArea
-                readOnly: true
-                text: backend.installText
-                font.family: "monospace"
-                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                wrapMode: Controls.TextArea.NoWrap
-                selectByMouse: true
-                background: null
-            }
-        }
+            ListView {
+                id: outputList
+                model: backend.installOutput
 
-        Connections {
-            target: backend
-            function onInstallTextChanged() {
-                if (dialog.running || dialog.visible) {
-                    outputScroll.contentItem.contentY = Math.max(0, outputArea.contentHeight - outputScroll.height);
+                // follow the tail: every new line scrolls the view down, which is
+                // what somebody watching apt wants, and scrolling up pauses it
+                onCountChanged: {
+                    if (following) {
+                        positionViewAtEnd();
+                    }
+                }
+
+                delegate: Controls.Label {
+                    id: outputLine
+                    required property string line
+
+                    width: outputList.width
+                    text: outputLine.line
+                    font.family: "monospace"
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    color: outputLine.line.startsWith("#") ? Kirigami.Theme.disabledTextColor
+                           : Kirigami.Theme.textColor
+                    opacity: outputLine.line.startsWith("#") ? 0.8 : 1.0
+                    wrapMode: Text.WrapAnywhere
+                    textFormat: Text.PlainText
                 }
             }
         }
@@ -270,29 +281,15 @@ Kirigami.Dialog {
             text: "The installation did not finish: " + ((dialog.outcome && dialog.outcome.error) || "unknown error")
                   + "  You can copy the commands and run them yourself."
         }
-
-        Controls.Label {
-            Layout.fillWidth: true
-            visible: !dialog.running && (!dialog.plan.possible || dialog.finished)
-            text: "Commands (copy and run them yourself if you prefer):"
-            font: Kirigami.Theme.smallFont
-            opacity: 0.75
-        }
-
-        Controls.TextArea {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit * 7
-            visible: !dialog.running && (!dialog.plan.possible || dialog.finished)
-            readOnly: true
-            selectByMouse: true
-            font.family: "monospace"
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            wrapMode: Controls.TextArea.NoWrap
-            text: dialog.plan.manual !== undefined ? dialog.plan.manual : ""
-        }
     }
 
     customFooterActions: [
+        Kirigami.Action {
+            text: "Open the script"
+            icon.name: "text-x-script"
+            visible: dialog.plan.scriptPath !== undefined && dialog.plan.scriptPath !== ""
+            onTriggered: backend.openPath(dialog.plan.scriptPath)
+        },
         Kirigami.Action {
             text: "Copy commands"
             icon.name: "edit-copy"
@@ -310,11 +307,10 @@ Kirigami.Dialog {
         },
         Kirigami.Action {
             text: dialog.running ? "Cancel"
-                  : (dialog.plan.status !== undefined && dialog.plan.status.available === true
-                     ? "Run the plan anyway" : "Install ClamAV")
+                  : (dialog.alreadyAvailable ? "Run the plan anyway" : "Install ClamAV")
             icon.name: dialog.running ? "process-stop" : "install"
             visible: dialog.plan.possible === true
-            enabled: dialog.plan.possible === true && (!dialog.finished || !dialog.outcome.ok)
+            enabled: dialog.plan.possible === true && !dialog.running
             onTriggered: {
                 if (dialog.running) {
                     backend.cancelClamavInstall();

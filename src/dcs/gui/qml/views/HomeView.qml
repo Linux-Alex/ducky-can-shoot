@@ -4,6 +4,8 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import org.kde.kirigami as Kirigami
 
+import "../components"
+
 /*!
     Step 1: pick the medium, decide what the job should do, start it.
 */
@@ -99,7 +101,7 @@ Controls.ScrollView {
                         required property string vendor
                         required property string modelName
 
-                        width: parent ? parent.width : implicitWidth
+                        Layout.fillWidth: true
                         highlighted: backend.selectedRow === index
                         onClicked: backend.selectDevice(index)
 
@@ -375,10 +377,10 @@ Controls.ScrollView {
                 }
             }
 
-            Controls.ProgressBar {
+            DcsProgressBar {
                 visible: backend.state === "running"
                 indeterminate: true
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 6
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 8
             }
 
             Controls.Button {
