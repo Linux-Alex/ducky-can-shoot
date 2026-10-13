@@ -8,9 +8,10 @@ import io
 import json
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import pytest
 

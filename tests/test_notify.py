@@ -12,7 +12,7 @@ import ssl
 from email import message_from_binary_file, policy
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -101,7 +101,8 @@ class FakeSmtp:
     """Records everything a real smtplib.SMTP would have done."""
 
     kind = "plain"
-    instances: list[FakeSmtp] = []
+    #: every instance created during a test, so a test can inspect the traffic
+    instances: ClassVar[list[FakeSmtp]] = []
     #: when set the constructor raises OSError with this text
     connect_error: str = ""
     #: when set send_message raises it
@@ -154,11 +155,21 @@ class FakeSmtp:
         self._note("login", user, password)
         return 235, b"accepted"
 
-    def send_message(self, message: EmailMessage) -> dict[str, Any]:
-        self._note("send_message", message)
+    def send_message(
+        self, message: EmailMessage, to_addrs: list[str] | None = None
+    ) -> dict[str, Any]:
+        self._note("send_message", message, to_addrs)
         if type(self).send_error is not None:
             raise type(self).send_error
         return {}
+
+    @property
+    def envelope_recipients(self) -> list[str] | None:
+        """The to_addrs smtplib was asked to deliver to (None = from headers)."""
+        for name, args in self.calls:
+            if name == "send_message":
+                return args[1] if len(args) > 1 else None
+        raise AssertionError("no message was sent")
 
     def noop(self) -> tuple[int, bytes]:
         self._note("noop")
@@ -449,12 +460,33 @@ def test_build_message_omits_optional_headers(email_config: EmailConfig) -> None
     assert message["To"] == "ops@example.test"
 
 
-@pytest.mark.xfail(reason="configured bcc addrs are counted as recipients but never added to the message")
 def test_build_message_keeps_bcc_recipients(email_config: EmailConfig) -> None:
-    """A configured BCC must reach the envelope, not only the log line."""
+    """A blind copy must never appear in the headers.
+
+    A Bcc header would leak exactly the address the user wanted to keep out of
+    the visible recipient list, so the address travels in the SMTP envelope
+    instead; test_send_delivers_to_bcc_through_the_envelope covers that half.
+    """
     email_config.bcc_addrs = ["archive@example.test"]
     message = Notifier(email_config).build_message(make_job())
-    assert message["Bcc"] == "archive@example.test"
+    assert message["Bcc"] is None
+    assert "archive@example.test" not in str(message["To"])
+    assert "archive@example.test" not in str(message["Cc"])
+
+
+def test_send_delivers_to_bcc_through_the_envelope(
+    fake_smtp: type[FakeSmtp], email_config: EmailConfig
+) -> None:
+    """The Bcc address is handed to smtplib as an envelope recipient."""
+    email_config.bcc_addrs = ["archive@example.test"]
+    email_config.to_addrs = ["ops@example.test"]
+    outcome = Notifier(email_config).send(make_job())
+
+    assert outcome.sent is True
+    assert "archive@example.test" in outcome.recipients
+    client = only_client()
+    assert client.envelope_recipients == ["ops@example.test", "archive@example.test"]
+    assert client.sent_message["Bcc"] is None
 
 
 def test_build_message_attaches_real_files(email_config: EmailConfig, tmp_path: Path) -> None:

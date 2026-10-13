@@ -382,7 +382,10 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
         if spec is None:
             log.debug("ignoring unknown config key %s.%s", cls.__name__, key)
             continue
-        kwargs[key] = _coerce(spec.type, value)
+        coerced = _coerce(spec.type, value)
+        if coerced is UNCONVERTIBLE:
+            continue
+        kwargs[key] = coerced
     try:
         return cls(**kwargs)
     except TypeError as exc:  # pragma: no cover - defensive
@@ -390,9 +393,27 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
         return cls()
 
 
+#: returned by _coerce when a value cannot be converted; callers keep their
+#: default instead of storing something of the wrong type
+UNCONVERTIBLE = object()
+
+#: builtin type names as they appear in postponed annotations
+_BUILTIN_TYPES: dict[str, Any] = {
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "str": str,
+    "list": list,
+    "dict": dict,
+}
+
+
 def _coerce(annotation: Any, value: Any) -> Any:
-    if isinstance(annotation, str):  # postponed annotations
-        annotation = _RESOLVE.get(annotation, annotation)
+    if isinstance(annotation, str):
+        # Postponed annotations (from __future__ import annotations) leave the
+        # field type as a string.  Resolve the builtins, otherwise every type
+        # check below silently falls through and bad values are stored as is.
+        annotation = _BUILTIN_TYPES.get(annotation, _RESOLVE.get(annotation, annotation))
     if is_dataclass(annotation) and isinstance(value, dict):
         return _build(annotation, value)
     origin = get_origin(annotation)
@@ -403,16 +424,22 @@ def _coerce(annotation: Any, value: Any) -> Any:
         return list(value)
     if annotation is bool and not isinstance(value, bool):
         return str(value).strip().lower() in ("1", "true", "yes", "on")
-    if annotation is int and isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
+    if annotation is int and not isinstance(value, bool):
+        if isinstance(value, int):
             return value
-    if annotation is float and isinstance(value, (int, str)):
         try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            log.warning("ignoring %r: an integer was expected", value)
+            return UNCONVERTIBLE
+    if annotation is float and not isinstance(value, bool):
+        if isinstance(value, (int, float)):
             return float(value)
-        except ValueError:
-            return value
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            log.warning("ignoring %r: a number was expected", value)
+            return UNCONVERTIBLE
     return value
 
 
@@ -426,7 +453,9 @@ def _overlay(target: Any, data: dict[str, Any]) -> None:
         if is_dataclass(current) and isinstance(value, dict):
             _overlay(current, value)
         else:
-            setattr(target, key, _coerce(type(current) if current is not None else str, value))
+            coerced = _coerce(type(current) if current is not None else str, value)
+            if coerced is not UNCONVERTIBLE:
+                setattr(target, key, coerced)
 
 
 #: small map so postponed string annotations can be resolved when needed
@@ -445,6 +474,33 @@ _RESOLVE: dict[str, Any] = {
 }
 
 
+def escape_toml_string(value: str) -> str:
+    """Escape a string for a TOML basic string.
+
+    Control characters have to be escaped: writing a literal newline inside a
+    basic string produces a file that tomllib rejects, and since the loader
+    treats an unreadable file as "no overrides", the whole configuration would
+    silently fall back to the defaults.
+    """
+    out: list[str] = []
+    for char in value:
+        if char == "\\":
+            out.append("\\\\")
+        elif char == '"':
+            out.append('\\"')
+        elif char == "\n":
+            out.append("\\n")
+        elif char == "\r":
+            out.append("\\r")
+        elif char == "\t":
+            out.append("\\t")
+        elif ord(char) < 0x20 or ord(char) == 0x7F:
+            out.append(f"\\u{ord(char):04X}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
 def dumps_toml(data: dict[str, Any]) -> str:
     """Minimal TOML writer for the config shape (no dependency required)."""
     lines: list[str] = []
@@ -455,11 +511,10 @@ def dumps_toml(data: dict[str, Any]) -> str:
         if isinstance(value, (int, float)):
             return repr(value)
         if isinstance(value, str):
-            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-            return f'"{escaped}"'
+            return f'"{escape_toml_string(value)}"'
         if value is None:
             return '""'
-        return f'"{value}"'
+        return f'"{escape_toml_string(str(value))}"'
 
     def emit(section: dict[str, Any], prefix: str) -> None:
         simple = {k: v for k, v in section.items() if not isinstance(v, dict)}

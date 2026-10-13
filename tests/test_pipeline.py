@@ -125,7 +125,7 @@ def test_clean_medium_runs_every_stage(
 
     # the sink announces the seven pending stages first, in pipeline order
     assert sink.stages[:7] == [(stage, StageState.PENDING, "") for stage in STAGE_ORDER]
-    assert sink.stage_states() == {stage: StageState.DONE for stage in STAGE_ORDER}
+    assert sink.stage_states() == dict.fromkeys(STAGE_ORDER, StageState.DONE)
 
     assert result.verdict is Verdict.CLEAN
     assert result.safe is True
@@ -177,6 +177,35 @@ def test_clean_medium_runs_every_stage(
     assert [timing.stage for timing in result.timings] == [stage.value for stage in STAGE_ORDER]
     assert {timing.state for timing in result.timings} == {"done"}
     assert all(timing.seconds >= 0.0 for timing in result.timings)
+
+
+def test_json_report_is_rewritten_with_every_stage_and_the_email(
+    tmp_config: AppConfig,
+    clean_tree: Path,
+    fake_provider: FakeProvider,
+    tmp_path: Path,
+) -> None:
+    """The JSON on disk is refreshed at the end, so it holds all seven stages."""
+    tmp_config.upload.enabled = True
+    tmp_config.report.write_json = True
+
+    result, _ = run_job(tmp_config, clean_tree)
+
+    document = json.loads(Path(result.report_paths["json"]).read_text(encoding="utf-8"))
+
+    assert [timing["stage"] for timing in document["timings"]] == [
+        stage.value for stage in STAGE_ORDER
+    ]
+    assert {timing["state"] for timing in document["timings"]} == {"done"}, (
+        "no stage may be left pending in the final report"
+    )
+    assert document["email"]["ok"] is True
+    assert document["email"]["dryRun"] is True
+    assert document["email"]["messagePath"] == result.email.message_path
+    assert document["reports"]["json"] == result.report_paths["json"]
+    assert document["verdict"] == "clean"
+    assert document["shareLink"] == FAKE_LINK
+    assert document["jobId"] == result.job_id
 
 
 def test_infected_medium_is_neither_archived_nor_uploaded(
@@ -383,9 +412,9 @@ def test_cancel_before_the_scan_leaves_the_medium_unscanned(
     states = sink.stage_states()
     assert states[Stage.INSPECT] is StageState.DONE
     assert states[Stage.SCAN] is StageState.SKIPPED
-    assert states[Stage.VERDICT] is StageState.FAILED
+    assert states[Stage.VERDICT] is StageState.CANCELLED
     verdict_events = [message for stage, state, message in sink.stages if stage is Stage.VERDICT]
-    assert verdict_events[-1] == "the scan did not run"
+    assert verdict_events[-1] == "the run was cancelled"
     # archive, upload and email never ran either and say why
     assert states[Stage.ARCHIVE] is StageState.SKIPPED
     assert states[Stage.UPLOAD] is StageState.SKIPPED
@@ -405,16 +434,13 @@ def test_cancel_before_the_scan_leaves_the_medium_unscanned(
     assert result.email is None
     assert fake_provider.calls == []
     assert archives_in(tmp_path / "out") == []
-    # documented current behaviour: a run stopped before the scan ends as error,
-    # see test_cancelled_run_should_report_the_cancelled_verdict below
-    assert result.verdict is Verdict.ERROR
+    # a run stopped before the scan reports "cancelled", never "error": the
+    # report and the email must not claim the medium could not be evaluated
+    assert result.verdict is Verdict.CANCELLED
     # the failure report is still written
     assert set(result.report_paths) == {"html", "text", "csv", "json"}
 
 
-@pytest.mark.xfail(
-    reason="a run cancelled before the scan ends as verdict error instead of cancelled"
-)
 def test_cancelled_run_should_report_the_cancelled_verdict(
     tmp_config: AppConfig,
     clean_tree: Path,

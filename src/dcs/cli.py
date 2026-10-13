@@ -195,16 +195,21 @@ def format_result(result: dict[str, Any]) -> str:
         f"  findings      : {result.get('findingCount', 0):,} ({result.get('threatCount', 0)} threatening)",
         f"  duration      : {result.get('durationText', '-')}",
     ]
+    covered: set[str] = set()
     archive = result.get("archive") or {}
     if archive.get("ok"):
         lines.append(f"  archive       : {archive.get('archiveBytesText')} in {archive.get('partCount')} file(s)")
         lines.append(f"                  {archive.get('primaryPath')}")
+        covered.add("archive")
     if result.get("shareLink"):
         lines.append(f"  share link    : {result['shareLink']}")
+        covered.add("upload")
     elif result.get("uploadSkippedReason"):
         lines.append(f"  upload        : {result['uploadSkippedReason']}")
+        covered.add("upload")
     email = result.get("email") or {}
     if email:
+        covered.add("email")
         if email.get("sent"):
             lines.append(f"  email         : sent to {', '.join(email.get('recipients', []))}")
         elif email.get("dryRun"):
@@ -214,6 +219,16 @@ def format_result(result: dict[str, Any]) -> str:
     reports = result.get("reports") or {}
     if reports.get("html"):
         lines.append(f"  report        : {reports['html']}")
+        covered.add("report")
+
+    # stages that were skipped or failed still owe the user an explanation
+    for timing in result.get("timings") or []:
+        stage = str(timing.get("stage", ""))
+        if stage in covered or timing.get("state") not in ("skipped", "failed"):
+            continue
+        palette = "red" if timing.get("state") == "failed" else None
+        text = f"  {stage:<13} : {timing.get('message', '')}"
+        lines.append(colour(text, palette) if palette else text)
     warnings = result.get("warnings") or []
     if warnings:
         lines.append("  notes:")

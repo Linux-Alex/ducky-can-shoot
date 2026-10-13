@@ -191,10 +191,21 @@ class Archiver:
         fmt = self.config.format if self.config.format in ("zip", "7z") else "zip"
 
         os.makedirs(dest_dir, exist_ok=True)
-        target = os.path.join(dest_dir, name)
         result.source_files = total_files
         result.source_bytes = total_bytes
 
+        # Resolve the tool *before* deciding on the file name: when 7z is
+        # configured but missing the job falls back to zip, and both the tool
+        # and the extension have to follow, otherwise DCS would write a zip
+        # archive called .7z.
+        tool = self.tool_for(fmt)
+        if not tool and fmt == "7z":
+            result.warnings.append("7z is not installed: falling back to a zip archive")
+            fmt = "zip"
+            name = os.path.splitext(name)[0] + ".zip"
+            tool = self.tool_for("zip")
+
+        target = os.path.join(dest_dir, name)
         ok, problem = self.check_capacity(dest_dir, total_bytes)
         if not ok:
             result.error = problem
@@ -211,18 +222,14 @@ class Archiver:
             f"({human_bytes(total_bytes)})",
         )
 
-        tool = self.tool_for(fmt)
         if tool:
             result.tool = "7z" if fmt == "7z" else "zip"
             return self._run_tool(
                 tool, fmt, root, target, sink, cancel, meter, result, total_files, total_bytes, size_map
             )
-        if fmt == "7z":
-            result.warnings.append("7z is not installed: falling back to a zip archive")
-            fmt = "zip"
         if self.config.split_size_mb:
             result.warnings.append(
-                "the zip tool is not installed, so the archive cannot be split; "
+                "no zip or 7z binary is installed, so the archive cannot be split; "
                 "producing a single file instead"
             )
         return self._run_python_zip(

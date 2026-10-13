@@ -87,6 +87,48 @@ def scan_argv(config: Path, path: Path, *extra: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# providers
+# ---------------------------------------------------------------------------
+
+
+def test_providers_lists_every_registry_id_in_order(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """dcs providers prints exactly the ids provider_ids() advertises, in order."""
+    from dcs.core.upload import provider_catalog, provider_ids
+
+    code = main(["--config", str(config_file), "providers"])
+
+    assert code == 0
+    output = capsys.readouterr().out
+    printed = [
+        line.split()[0]
+        for line in output.splitlines()
+        if line.strip() and not line.startswith(" ")
+    ]
+    assert printed == provider_ids()
+    assert len(printed) == 7
+    assert "0x0" not in printed
+    for entry in provider_catalog():
+        assert entry["label"] in output, entry["id"]
+        assert "API key required" if entry["requiresKey"] else "no account needed" in output
+
+
+def test_providers_json_matches_the_catalog(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The JSON form carries the same entries as provider_catalog()."""
+    from dcs.core.upload import provider_catalog
+
+    code = main(["--config", str(config_file), "providers", "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == provider_catalog()
+    assert [entry["id"] for entry in payload] == [entry["id"] for entry in provider_catalog()]
+
+
+# ---------------------------------------------------------------------------
 # devices
 # ---------------------------------------------------------------------------
 

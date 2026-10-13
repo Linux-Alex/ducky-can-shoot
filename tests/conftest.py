@@ -27,9 +27,10 @@ import os
 import stat
 import struct
 import zipfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 

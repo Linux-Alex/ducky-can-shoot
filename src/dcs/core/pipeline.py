@@ -356,6 +356,12 @@ class _RunContext:
     def decide(self) -> None:
         stage = Stage.VERDICT
         self._begin(stage, "evaluating the findings")
+        # A cancelled run is never an error: the report and the email would
+        # otherwise tell the recipient that the medium could not be evaluated.
+        if self.cancel.is_set():
+            self.result.verdict = Verdict.CANCELLED
+            self._finish(stage, StageState.CANCELLED, "the run was cancelled")
+            return
         if self.scan_result is None:
             self.result.verdict = Verdict.ERROR
             self._finish(stage, StageState.FAILED, "the scan did not run")

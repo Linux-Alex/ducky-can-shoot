@@ -6,9 +6,8 @@ the contract with whoever receives the image.  The python zipfile fallback is
 covered by hiding both binaries from the module, and the capacity check by
 replacing free_bytes.
 
-One test is marked xfail: it documents that a 7z format without 7z installed
-falls back to the python zipfile writer without ever re-checking for the zip
-binary, which is present (see the marker reason).
+A 7z format without 7z installed must downgrade to the zip binary *and* to a
+.zip file name; test_zip_binary_is_used_after_downgrading_from_7z pins that.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ import pytest
 
 from dcs.core.archiver import (
     ArchivePart,
-    ArchiveResult,
     Archiver,
+    ArchiveResult,
     archive_name,
     human_archive_summary,
     plan_source,
@@ -217,7 +216,7 @@ def test_create_splits_zip_into_volumes(tmp_path: Path, archive_config: ArchiveC
     dest = tmp_path / "images"
     name = "DCS_holiday_split.zip"
 
-    result, sink = create_archive(archive_config, root, dest, name)
+    result, _sink = create_archive(archive_config, root, dest, name)
 
     assert result.ok is True
     assert result.error == ""
@@ -265,7 +264,7 @@ def test_create_splits_7z_into_numbered_volumes(
     dest = tmp_path / "images"
     name = "DCS_holiday.7z"
 
-    result, sink = create_archive(archive_config, root, dest, name)
+    result, _sink = create_archive(archive_config, root, dest, name)
 
     assert result.ok is True, result.error
     assert result.tool == "7z"
@@ -329,9 +328,6 @@ def test_fallback_warns_that_it_cannot_split_and_writes_one_file(
 
 
 @requires_zip
-@pytest.mark.xfail(
-    reason="a 7z format without 7z installed falls back to the python zipfile writer although zip is present, keeps the .7z file name and warns that zip is not installed"
-)
 def test_zip_binary_is_used_after_downgrading_from_7z(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archive_config: ArchiveConfig
 ) -> None:
@@ -345,7 +341,7 @@ def test_zip_binary_is_used_after_downgrading_from_7z(
     root = make_tree(tmp_path / "usb", {"random.bin": 2 * 1024 * 1024})
     dest = tmp_path / "images"
 
-    result, sink = create_archive(archive_config, root, dest, "DCS_holiday.7z")
+    result, _sink = create_archive(archive_config, root, dest, "DCS_holiday.7z")
 
     # the zip binary is installed, so the downgraded archive can be built and
     # split with it, and the warning must not claim that zip is missing

@@ -9,8 +9,9 @@ QApplication exists.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 
@@ -19,8 +20,7 @@ pytest.importorskip("PyQt6.QtQml", reason="PyQt6 QtQml is not installed")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QLibraryInfo, QModelIndex, Qt, QUrl  # noqa: E402
-from PyQt6.QtQml import QQmlApplicationEngine  # noqa: E402
+from PyQt6.QtCore import QLibraryInfo, QModelIndex
 
 _PLATFORM_PLUGINS = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)) / "platforms"
 if not list(_PLATFORM_PLUGINS.glob("*offscreen*")):
@@ -38,8 +38,8 @@ from dcs.core.events import (  # noqa: E402
     StageState,
 )
 from dcs.core.log import LogRecordView, log_ring  # noqa: E402
-from dcs.gui import app as gui_app  # noqa: E402
 from dcs.core.upload import provider_catalog  # noqa: E402
+from dcs.gui import app as gui_app  # noqa: E402
 from dcs.gui.backend import IDLE, Backend  # noqa: E402
 from dcs.gui.models import (  # noqa: E402
     DevicesModel,
@@ -479,19 +479,20 @@ def _is_ignored(message: str) -> bool:
     return any(marker in message for marker in IGNORED_QML_WARNINGS)
 
 
-def test_main_qml_loads_without_warnings(backend: Backend, qapp: Any, qt_messages: list[str]) -> None:
-    engine_warnings: list[str] = []
-    engine = QQmlApplicationEngine()
-    for path in gui_app.find_qml_imports():
-        engine.addImportPath(path)
-    engine.warnings.connect(lambda items: engine_warnings.extend(item.toString() for item in items))
-    engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("appVersion", __version__)
-    engine.rootContext().setContextProperty("appName", APP_NAME)
+def test_main_qml_loads_and_tears_down_without_warnings(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """The real entry point loads Main.qml, binds to the backend and tears down cleanly."""
+    qml_warnings: list[str] = []
 
-    main_qml = Path(gui_app.qml_directory()) / "Main.qml"
-    engine.load(QUrl.fromLocalFile(str(main_qml)))
+    def collect(record: Any) -> None:
+        if record.message.startswith("QML:"):
+            qml_warnings.append(record.message)
+
+    log_ring().add_listener(collect)
+    engine, loaded_backend = gui_app.build_engine(backend.config, backend)
     try:
+        assert loaded_backend is backend
         qapp.processEvents()
 
         roots = engine.rootObjects()
@@ -502,13 +503,21 @@ def test_main_qml_loads_without_warnings(backend: Backend, qapp: Any, qt_message
         assert window.property("jobActive") is False
         window.setProperty("tabIndex", 3)
         assert window.property("tabIndex") == 3
+        # the module keeps the engine and the backend alive for the session, so
+        # no QML binding can ever re-evaluate against a collected backend
+        assert gui_app._SESSION["backend"] is backend
+        assert gui_app._SESSION["engine"] is engine
 
-        assert engine_warnings == []
-        assert [message for message in qt_messages if not _is_ignored(message)] == []
-    finally:
-        for obj in engine.rootObjects():
-            obj.deleteLater()
+        # teardown is part of the contract: it must destroy the QML tree before
+        # the interpreter drops the backend, and stay silent while doing it
+        gui_app.teardown_engine(engine)
         qapp.processEvents()
+        assert gui_app._SESSION == {}
+    finally:
+        log_ring().remove_listener(collect)
+
+    assert qml_warnings == []
+    assert [message for message in qt_messages if not _is_ignored(message)] == []
 
 
 def test_qml_directory_and_import_paths_exist() -> None:

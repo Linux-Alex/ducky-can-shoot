@@ -134,7 +134,10 @@ class Notifier:
             return outcome
 
         try:
-            client.send_message(message)
+            # The envelope recipients are passed explicitly: a Bcc header is not
+            # written (that would defeat the point), so smtplib cannot derive
+            # them from the headers and they would silently receive nothing.
+            client.send_message(message, to_addrs=outcome.recipients or [config.from_addr])
             outcome.ok = True
             outcome.sent = True
             log.info("verdict email sent to %s", ", ".join(outcome.recipients))

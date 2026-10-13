@@ -1,0 +1,143 @@
+# Ducky Can Shoot - annotated example configuration
+#
+# Copy it to ~/.config/dcs/config.toml (or pass it with --config PATH) and edit
+# what you need. Every key below is the built-in default, generated from the
+# code so the file can never drift from the implementation.
+#
+#   dcs config path     show the file that is in use
+#   dcs config init     write this file if it does not exist yet
+#   dcs config show     print the effective configuration
+#   dcs providers       list the upload hosts and their limits
+#
+# Secrets are NOT meant to live here. Prefer the environment variables
+# (DCS_SMTP_PASSWORD, DCS_SMTP_USERNAME, DCS_GOFILE_TOKEN, DCS_PIXELDRAIN_API_KEY)
+# or a helper command such as password_command = "pass show dcs/smtp".
+#
+# Deciding what a job does:
+#   archive.when         clean | always | never   when to build the image
+#   upload.upload_when   clean | always | never   when to publish it
+#   With the defaults a malicious medium is scanned, reported and emailed,
+#   but never archived and never uploaded.
+#
+# Every path below is empty by default, which means:
+#   output_dir       -> ~/.local/share/dcs
+#   report.directory -> ~/.local/share/dcs/reports
+#
+# email.enabled defaults to true, so a fresh file is "incomplete" until
+# smtp_host, from_addr and to_addrs are filled in: dcs doctor and the settings
+# page both say so. Set email.enabled = false to triage quietly instead.
+#
+# The interface has no theme setting on purpose: it follows the Plasma colour
+# scheme, icon theme and fonts.
+#
+# The [upload.<id>] sections are named after the provider ids shown by
+# "dcs providers"; base_url is only needed to point an adapter at a mirror.
+
+[general]
+confirm_before_upload = true
+keep_archive = true
+output_dir = ""
+ui_refresh_ms = 100
+
+[scan]
+engines = ["clamav", "heuristic"]
+max_file_size_mb = 4096
+max_findings = 0
+max_files = 0
+follow_symlinks = false
+include_hidden = true
+hash_findings = true
+exclude_globs = ["System Volume Information/*", "$RECYCLE.BIN/*", "*.tmp"]
+blocking_severity = "high"
+
+[scan.clamav]
+enabled = true
+prefer_daemon = true
+clamdscan_binary = "clamdscan"
+clamscan_binary = "clamscan"
+extra_args = []
+batch_size = 400
+max_database_age_days = 7
+
+
+[archive]
+enabled = true
+format = "zip"
+compression_level = 6
+split_size_mb = 0
+size_warn_gb = 20
+when = "clean"
+use_device_label = true
+min_free_space_ratio = 1.1
+
+[upload]
+enabled = true
+provider = "gofile"
+upload_when = "clean"
+timeout_s = 1800
+retries = 2
+delete_archive_after_upload = false
+
+[upload.gofile]
+token = ""
+token_command = ""
+folder_prefix = "DCS"
+
+[upload.pixeldrain]
+api_key = ""
+api_key_command = ""
+base_url = ""
+
+[upload.x0at]
+base_url = ""
+
+[upload.tempsh]
+base_url = ""
+
+[upload.catbox]
+base_url = ""
+
+[upload.tmpfiles]
+base_url = ""
+
+[upload.litterbox]
+base_url = ""
+
+
+[email]
+enabled = true
+smtp_host = ""
+smtp_port = 587
+security = "starttls"
+username = ""
+password = ""
+password_command = ""
+from_addr = ""
+from_name = "Ducky Can Shoot"
+to_addrs = []
+cc_addrs = []
+bcc_addrs = []
+reply_to = ""
+subject_template = "[DCS] {verdict} - {device} ({files} files)"
+attach_report = true
+always_send = true
+timeout_s = 60
+insecure_tls = false
+dry_run_dir = ""
+
+[report]
+enabled = true
+directory = ""
+format = "html"
+include_file_list = false
+max_findings = 500
+write_json = true
+
+[gui]
+remember_window_size = true
+window_width = 1180
+window_height = 780
+show_log_pane = true
+auto_select_new_device = true
+switch_to_result = true
+

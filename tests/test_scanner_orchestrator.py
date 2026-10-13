@@ -23,9 +23,8 @@ from dcs.core.events import (
     Verdict,
     severity_rank,
 )
-from dcs.core.scanner import Scanner, compute_verdict
+from dcs.core.scanner import FILE_LIST_LIMIT, Scanner, compute_verdict
 from dcs.core.util import walk_files
-
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -218,6 +217,46 @@ def test_limited_coverage_is_true_without_clamav(sample_tree: Path) -> None:
     result = Scanner(heuristic_only()).run(str(sample_tree))
     assert result.limited_coverage is True
     assert result.to_dict()["limitedCoverage"] is True
+
+
+# ---------------------------------------------------------------------------
+# optional file list
+# ---------------------------------------------------------------------------
+
+
+def test_file_list_is_empty_unless_collect_files_is_on(clean_tree: Path) -> None:
+    """Collecting the file list is opt in, because it costs memory."""
+    assert Scanner(heuristic_only()).run(str(clean_tree)).file_list == []
+    assert Scanner(heuristic_only(), collect_files=False).run(str(clean_tree)).file_list == []
+    assert FILE_LIST_LIMIT == 20000
+
+
+def test_collect_files_fills_the_file_list_with_relative_paths(clean_tree: Path) -> None:
+    """collect_files=True records every scanned file relative to the scan root."""
+    result = Scanner(heuristic_only(), collect_files=True).run(str(clean_tree))
+
+    expected = sorted(
+        os.path.relpath(entry.path, clean_tree)
+        for entry in walk_files(clean_tree, include_hidden=True)
+    )
+    assert sorted(result.file_list) == expected
+    assert "readme.txt" in result.file_list
+    assert all(not os.path.isabs(name) for name in result.file_list)
+    assert result.to_dict()["fileList"] == result.file_list
+
+
+def test_file_list_is_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A medium with more files than FILE_LIST_LIMIT fills only the first slice."""
+    monkeypatch.setattr("dcs.core.scanner.FILE_LIST_LIMIT", 5)
+    root = tmp_path / "many"
+    root.mkdir()
+    for index in range(12):
+        (root / f"file{index:02d}.txt").write_text("hello\n")
+
+    result = Scanner(heuristic_only(), collect_files=True).run(str(root))
+
+    assert result.stats.files_scanned == 12
+    assert len(result.file_list) == 5
 
 
 # ---------------------------------------------------------------------------

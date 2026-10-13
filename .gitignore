@@ -14,6 +14,8 @@ htmlcov/
 /out/
 /reports/
 # local secrets -- never commit
-config.toml
-secrets.toml
+/config.toml
+/secrets.toml
 .env
+# ...but the shipped example configuration is part of the project
+!examples/config.toml

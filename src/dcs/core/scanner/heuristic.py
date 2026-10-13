@@ -417,6 +417,10 @@ class HeuristicEngine:
         findings: list[Finding] = []
         commands: list[str] = []
         payload_seen = False
+        # Only the keys that actually start something make this file a launcher.
+        # An icon= or label= entry is cosmetic, and flagging every autorun.inf
+        # that merely sets an icon would drown the real finding in noise.
+        launch_keys = ("open", "shellexecute", "run")
         for line in text.splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith(";") or stripped.startswith("["):
@@ -424,15 +428,21 @@ class HeuristicEngine:
             key, _, value = stripped.partition("=")
             key = key.strip().lower()
             value = value.strip().strip('"')
-            if key in ("open", "shellexecute", "run", "icon", "action") and value:
-                commands.append(f"{key}={value}")
-                if os.path.splitext(value)[1].lower() in rules.EXECUTABLE_EXTENSIONS:
-                    payload_seen = True
-                target = os.path.join(os.path.dirname(entry.path), value)
-                if os.path.exists(target):
-                    payload_seen = True
-        if not commands:
+            if not value:
+                continue
+            if key not in launch_keys:
+                if key in ("icon", "action", "label", "shell"):
+                    commands.append(f"{key}={value} (not a launcher)")
+                continue
+            commands.append(f"{key}={value}")
+            if os.path.splitext(value)[1].lower() in rules.EXECUTABLE_EXTENSIONS:
+                payload_seen = True
+            target = os.path.join(os.path.dirname(entry.path), value)
+            if os.path.exists(target):
+                payload_seen = True
+        if not any(not command.endswith("(not a launcher)") for command in commands):
             return findings
+        commands = [command for command in commands if not command.endswith("(not a launcher)")]
         severity = Severity.CRITICAL if payload_seen else Severity.HIGH
         findings.append(
             self._finding(

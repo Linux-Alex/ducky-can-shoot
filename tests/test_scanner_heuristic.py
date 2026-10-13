@@ -411,7 +411,6 @@ def test_autorun_without_a_reachable_payload_is_high(
     assert "shellexecute=launch_stub" in finding.detail
 
 
-@pytest.mark.xfail(reason="an icon-only autorun.inf is reported as launching a payload")
 def test_an_icon_only_autorun_inf_is_not_reported_as_a_launcher(
     tmp_path: Path, sample_builder: SampleBuilder, engine: HeuristicEngine
 ) -> None:

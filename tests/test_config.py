@@ -9,7 +9,6 @@ passes system_path explicitly, so neither the developer's config nor the real
 from __future__ import annotations
 
 import logging
-import os
 import shlex
 import stat
 import sys
@@ -75,6 +74,53 @@ def test_defaults() -> None:
     assert config.gui.remember_window_size is True
     assert config.general.output_dir == ""
     assert config.source_path == ""
+
+
+def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
+    """The config schema does not grow dead or duplicate keys."""
+    data = AppConfig().to_dict()
+
+    assert set(data) == {
+        "general",
+        "scan",
+        "archive",
+        "upload",
+        "email",
+        "report",
+        "gui",
+    }
+    assert set(data["general"]) == {
+        "confirm_before_upload",
+        "keep_archive",
+        "output_dir",
+        "ui_refresh_ms",
+    }
+    assert set(data["gui"]) == {
+        "auto_select_new_device",
+        "remember_window_size",
+        "show_log_pane",
+        "switch_to_result",
+        "window_height",
+        "window_width",
+    }
+    # general.language and gui.confirm_upload were removed on purpose
+    assert "language" not in data["general"]
+    assert "confirm_upload" not in data["gui"]
+    assert "theme" not in data["gui"]
+
+
+def test_upload_sections_match_the_host_table() -> None:
+    """Every simple host has its own section; the old zeroxzero key is gone."""
+    config = AppConfig()
+
+    for provider_id in ("x0at", "tempsh", "catbox", "tmpfiles", "litterbox"):
+        section = getattr(config.upload, provider_id)
+        assert section.base_url == ""
+
+    assert not hasattr(config.upload, "zeroxzero")
+    # pixeldrain used to default to https://pixeldrain.com/api, which made the
+    # override impossible to distinguish from "not configured"
+    assert config.upload.pixeldrain.base_url == ""
 
 
 def test_default_instances_do_not_share_mutable_state() -> None:
@@ -760,8 +806,7 @@ def test_validation_problems_is_empty_for_a_sane_config() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="dumps_toml does not escape newlines so its output is not valid TOML")
-def test_xfail_dumps_toml_escapes_control_characters_in_strings() -> None:
+def test_dumps_toml_escapes_control_characters_in_strings() -> None:
     config = AppConfig()
     config.email.subject_template = "line1\nline2"
 
@@ -770,8 +815,7 @@ def test_xfail_dumps_toml_escapes_control_characters_in_strings() -> None:
     assert parsed["email"]["subject_template"] == "line1\nline2"
 
 
-@pytest.mark.xfail(reason="a non numeric string for an int field is stored unchanged instead of being rejected")
-def test_xfail_merge_rejects_a_non_numeric_int_value() -> None:
+def test_merge_rejects_a_non_numeric_int_value() -> None:
     config = AppConfig()
 
     config.merge({"email": {"smtp_port": "2525x"}})

@@ -172,22 +172,21 @@ def make_simple(provider_id: str, *, retries: int = 0, **kwargs: Any) -> SimpleH
 # ---------------------------------------------------------------------------
 
 
-def test_provider_ids_exact() -> None:
-    """The advertised provider list is stable, ordered and starts with the default."""
+def test_provider_ids_exact(upload_config: UploadConfig) -> None:
+    """The advertised ids are stable, ordered, default first, and all resolvable."""
     assert registry.provider_ids() == [
         "gofile",
-        *SIMPLE_HOSTS,
-    ]
-    assert set(registry.provider_ids()) == {
-        "gofile",
-        "pixeldrain",
-        "x0at",
-        "tmpfiles",
         "litterbox",
-        "catbox",
         "tempsh",
-    }
+        "x0at",
+        "catbox",
+        "tmpfiles",
+        "pixeldrain",
+    ]
     assert registry.provider_ids()[0] == UploadConfig().provider
+    for provider_id in registry.provider_ids():
+        provider = registry.build_provider(upload_config, provider_id)
+        assert provider.provider_id == provider_id, f"{provider_id} built {provider.provider_id}"
 
 
 def test_provider_catalog_shape() -> None:
@@ -203,8 +202,10 @@ def test_provider_catalog_shape() -> None:
 
     by_id = {entry["id"]: entry for entry in catalog}
     assert len(by_id) == len(catalog), "catalog ids must be unique"
-    # one entry per simple host, plus gofile
+    # one entry per simple host, plus gofile, in the order provider_ids() advertises
+    assert [entry["id"] for entry in catalog] == registry.provider_ids()
     assert set(by_id) == {"gofile", *SIMPLE_HOSTS}
+    assert all(entry["verified"] for entry in catalog), "every entry records how it was verified"
     assert by_id["gofile"]["requiresKey"] is False
     assert by_id["pixeldrain"]["requiresKey"] is True
     assert by_id["catbox"]["maxBytes"] == 200 * 1024**2
@@ -234,10 +235,18 @@ def test_build_provider_identity(
 
 def test_legacy_provider_id_is_resolved(upload_config: UploadConfig) -> None:
     """A renamed host id (0x0 -> x0at) still builds the successor adapter."""
+    assert registry.LEGACY_IDS == {"0x0": "x0at"}
     assert "0x0" not in registry.provider_ids()
+    assert registry.resolve_provider_id("0x0") == "x0at"
+    assert registry.resolve_provider_id("X0AT") == "x0at"
+    assert registry.resolve_provider_id("  Gofile  ") == "gofile"
+    assert registry.resolve_provider_id("") == ""
+    assert registry.resolve_provider_id("nope") == "nope"
+
     provider = registry.build_provider(upload_config, "0x0")
     assert provider.provider_id == "x0at"
     assert provider.label == "x0.at"
+    assert provider.upload_url == SIMPLE_HOSTS["x0at"].upload_url
 
 
 def test_build_provider_carries_config_and_secrets(upload_config: UploadConfig) -> None:
@@ -665,6 +674,99 @@ def test_availability_of_keyless_hosts() -> None:
     for provider_id in ("litterbox", "tempsh", "x0at", "catbox", "tmpfiles"):
         spec = SIMPLE_HOSTS[provider_id]
         assert make_simple(provider_id).availability() == (True, spec.notes)
+
+
+# ---------------------------------------------------------------------------
+# simple hosts: base_url override
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "base_url", "expected"),
+    [
+        # a bare host replaces the host and keeps the API path
+        (
+            "https://litterbox.catbox.moe/resources/internals/api.php",
+            "https://lb.example",
+            "https://lb.example/resources/internals/api.php",
+        ),
+        # a mirror that already carries the API prefix must not repeat it
+        (
+            "https://pixeldrain.com/api/file/{name}",
+            "https://mirror.example/api",
+            "https://mirror.example/api/file/{name}",
+        ),
+        # a trailing slash is ignored
+        (
+            "https://temp.sh/upload",
+            "https://mirror.example/",
+            "https://mirror.example/upload",
+        ),
+        # no scheme means https
+        ("https://x0.at/", "mirror.example", "https://mirror.example/"),
+        # an empty override keeps the spec URL untouched
+        ("https://catbox.moe/user/api.php", "", "https://catbox.moe/user/api.php"),
+        ("https://catbox.moe/user/api.php", "   ", "https://catbox.moe/user/api.php"),
+        # a base with a port and no path
+        (
+            "https://tmpfiles.org/api/v1/upload",
+            "http://127.0.0.1:8080",
+            "http://127.0.0.1:8080/api/v1/upload",
+        ),
+    ],
+)
+def test_rebase_helper(url: str, base_url: str, expected: str) -> None:
+    """_rebase swaps scheme and host while keeping the API layout."""
+    assert simple_module._rebase(url, base_url) == expected
+
+
+def test_litterbox_base_url_override_is_used_for_the_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """upload.litterbox.base_url redirects the POST to a mirror."""
+    config = UploadConfig()
+    config.litterbox.base_url = "https://lb.example"
+    provider = registry.build_provider(config, "litterbox")
+    assert isinstance(provider, SimpleHostProvider)
+    assert provider.upload_url == "https://lb.example/resources/internals/api.php"
+
+    sample = make_sample(tmp_path, "medium.zip")
+    post = Recorder(FakeResponse(200, text="https://lb.example/f/abc.zip\n"))
+    monkeypatch.setattr("requests.post", post)
+
+    result = provider.upload(str(sample))
+
+    assert result.ok is True
+    assert post.calls[0]["url"] == "https://lb.example/resources/internals/api.php"
+
+
+def test_pixeldrain_base_url_override_collapses_the_api_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mirror that already ends in /api does not double the path segment."""
+    config = UploadConfig()
+    config.pixeldrain.base_url = "https://mirror.example/api"
+    config.pixeldrain.api_key = "key-42"
+    provider = registry.build_provider(config, "pixeldrain")
+    assert provider.upload_url == "https://mirror.example/api/file/{name}"
+
+    sample = make_sample(tmp_path, "report image.zip")
+    put = Recorder(FakeResponse(200, text='{"id": "abc"}', payload={"id": "abc"}), read_body=True)
+    monkeypatch.setattr("requests.put", put)
+
+    result = provider.upload(str(sample))
+
+    assert result.ok is True
+    assert put.calls[0]["url"] == "https://mirror.example/api/file/report%20image.zip"
+
+
+def test_base_url_override_only_applies_to_the_matching_host(upload_config: UploadConfig) -> None:
+    """One host's mirror does not leak into the others."""
+    upload_config.litterbox.base_url = "https://lb.example"
+    assert registry.build_provider(upload_config, "litterbox").upload_url.startswith("https://lb.example")
+    for provider_id in ("tempsh", "x0at", "catbox", "tmpfiles", "pixeldrain"):
+        provider = registry.build_provider(upload_config, provider_id)
+        assert provider.upload_url == SIMPLE_HOSTS[provider_id].upload_url
 
 
 def test_http_error_from_a_simple_host_is_reported(

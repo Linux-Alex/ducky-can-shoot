@@ -208,11 +208,16 @@ def list_removable_devices(*, include_loop: bool = False) -> list[BlockDevice]:
 
 
 def find_device(identifier: str) -> BlockDevice | None:
-    """Look a device up by node path, name, label or mount point."""
+    """Look a device up by node path, name, label or mount point.
+
+    Unlike list_removable_devices() this searches *every* block device: the
+    caller asked for a specific node, which may be a loop device, an LVM volume
+    or anything else that does not carry the "removable" flag.
+    """
     if not identifier:
         return None
     wanted = os.path.abspath(identifier) if os.path.isabs(identifier) else identifier
-    devices = list_block_devices()
+    devices = list_block_devices(include_loop=True)
     for device in devices:
         if wanted in (device.path, device.name, device.label, device.uuid):
             return device
