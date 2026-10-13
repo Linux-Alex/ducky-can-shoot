@@ -11,7 +11,7 @@ the license of the project.
 ## Development environment
 
 ```bash
-git clone https://github.com/linux-alex/ducky-can-shoot
+git clone https://github.com/Linux-Alex/ducky-can-shoot
 cd ducky-can-shoot
 
 # a virtual environment is enough for the tests; the GUI needs PyQt6

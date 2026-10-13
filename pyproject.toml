@@ -34,9 +34,9 @@ dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
 toml = ["tomlkit>=0.12"]
 
 [project.urls]
-Homepage = "https://github.com/linux-alex/ducky-can-shoot"
-Documentation = "https://github.com/linux-alex/ducky-can-shoot/tree/main/docs"
-Issues = "https://github.com/linux-alex/ducky-can-shoot/issues"
+Homepage = "https://github.com/Linux-Alex/ducky-can-shoot"
+Documentation = "https://github.com/Linux-Alex/ducky-can-shoot/tree/main/docs"
+Issues = "https://github.com/Linux-Alex/ducky-can-shoot/issues"
 
 [project.scripts]
 dcs = "dcs.cli:main"

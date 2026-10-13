@@ -33,7 +33,7 @@ from dcs.core.upload.base import (
 
 log = get_logger("upload.simple")
 
-USER_AGENT = "DCS/0.1 (+https://github.com/linux-alex/ducky-can-shoot)"
+USER_AGENT = "DCS/0.1 (+https://github.com/Linux-Alex/ducky-can-shoot)"
 
 MiB = 1024**2
 GiB = 1024**3

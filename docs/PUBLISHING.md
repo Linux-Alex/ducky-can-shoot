@@ -8,7 +8,7 @@ here is needed to *use* DCS.
 
 ```bash
 cd ducky-can-shoot
-git remote add origin git@github.com:linux-alex/ducky-can-shoot.git
+git remote add origin git@github.com:Linux-Alex/ducky-can-shoot.git
 git push -u origin main
 ```
 
