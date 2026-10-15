@@ -1,0 +1,83 @@
+.TH DCS 1 "2026-10" "Ducky Can Shoot" "User Commands"
+.SH NAME
+dcs - scan a USB medium for malware, archive it, upload it and email the verdict
+.SH SYNOPSIS
+.B dcs
+.RI [ options ]
+.RI [ command ]
+.SH DESCRIPTION
+.B Ducky Can Shoot
+triages removable media.  It reads a medium, scans every file with ClamAV (when it
+is installed) and a built-in heuristic engine aimed at USB attacks, archives the
+medium into one image, uploads that image to a free host and sends the verdict by
+email, including the download link when the medium is safe.
+.PP
+If a threat is found the archive and upload stages are skipped: nothing found on
+the medium ever leaves the machine.
+.PP
+Started without a command,
+.B dcs
+opens the graphical interface, which runs the same pipeline as the command line.
+.SH OPTIONS
+.TP
+.B \-\-config PATH
+Configuration file to use instead of the per-user default.
+.TP
+.B \-\-log-level LEVEL
+DEBUG, INFO, WARNING or ERROR.
+.TP
+.B \-\-version
+Print the version and exit.
+.SH COMMANDS
+.TP
+.B dcs gui [\-\-device NODE] [\-\-autorun]
+Start the graphical interface, optionally on a medium and running the job.
+.TP
+.B dcs devices [\-\-json]
+List the removable media that are attached.
+.TP
+.B dcs scan PATH [\-\-engines IDS] [\-\-json]
+Scan a path and report the findings.
+.TP
+.B dcs run \-\-device NODE [\-\-to ADDRESS] [\-\-yes]
+Run the whole job: scan, archive, upload, email.
+.TP
+.B dcs watch [\-\-start|\-\-stop|\-\-status|\-\-test]
+Watch for media that are plugged in and react the way the configuration says;
+.B \-\-start
+puts a watcher in the background, which is what the desktop autostart entry does.
+.TP
+.B dcs doctor [\-\-smtp] [\-\-json]
+Check the environment, the engines and the configuration.
+.TP
+.B dcs config show|set|init|path
+Inspect, change or create the configuration.
+.TP
+.B dcs install\-clamav [\-\-dry-run]
+Install the optional ClamAV engine with the system package manager.
+.SH EXIT STATUS
+.TP
+.B 0
+The medium is clean.
+.TP
+.B 1
+Suspicious or infected.
+.TP
+.B 2
+The run failed, was cancelled, or could not be evaluated.
+.SH FILES
+.TP
+.I ~/.config/dcs/config.toml
+Per-user configuration.
+.TP
+.I /etc/dcs/config.toml
+System wide defaults, when present.
+.TP
+.I ~/.local/share/dcs
+Archives, reports and work files.
+.TP
+.I ~/.local/state/dcs/watch.log
+What the background watcher did.
+.SH SEE ALSO
+Documentation in
+.IR /usr/share/doc/ducky-can-shoot/ .

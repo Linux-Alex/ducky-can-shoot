@@ -101,6 +101,13 @@ cd ducky-can-shoot
 ./scripts/install.sh          # user level: ~/.local, no root needed
 ```
 
+Or, on Debian and Ubuntu, from the `.deb` of a release (see
+[the releases page](https://github.com/Linux-Alex/ducky-can-shoot/releases)):
+
+```bash
+sudo apt install ./ducky-can-shoot_0.1.0-1_all.deb
+```
+
 The script builds a virtual environment that can see the distribution packages,
 links `dcs` into `~/.local/bin`, installs the desktop entry and the icon, and
 writes a default configuration.
@@ -353,16 +360,35 @@ variable: **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
 ## Building and packaging
 
 ```bash
-python3 -m build                 # sdist and wheel in dist/
-pipx install .                   # or: pip install --user .
+make deb                         # dist/ducky-can-shoot_<version>-1_all.deb
+make build                       # sdist and wheel in dist/
 ./scripts/install.sh             # user level install with desktop entry and icon
+pipx install .                   # or: pip install --user .
+```
+
+The **Debian package** is architecture independent and bundles nothing: it depends
+on the distribution's Python, PyQt6, Kirigami and the Qt SVG plugins, exactly the
+packages the quick start asks for, so a second copy of Qt never ends up on the
+system. It installs `dcs` and `dcs-gui` in `/usr/bin`, the desktop entry, the
+AppStream metadata, the icon set, a man page in `/usr/share/man/man1/dcs.1.gz`
+and `/etc/xdg/autostart/org.kde.dcs.watch.desktop` - that last one is what lets
+the USB watcher run from login, and it stays inactive until a watch mode is
+enabled:
+
+```bash
+make deb
+sudo apt install ./dist/ducky-can-shoot_0.1.0-1_all.deb
+man dcs
 ```
 
 The wheel ships the QML interface, the icon and the hash list, so an installed DCS
-is self contained. `packaging/` holds the desktop entry and the scalable icon;
-the command is also exposed as `dcs-gui` and `ducky-can-shoot` for menu
-integration. Pushing a tag builds and attaches the release artefacts through
-[.github/workflows/release.yml](.github/workflows/release.yml).
+is self contained. `packaging/` holds the desktop entry, the icons, the AppStream
+metadata, the man page and the `.deb` skeleton; the command is also exposed as
+`dcs-gui` and `ducky-can-shoot` for menu integration.
+
+Pushing a tag builds the wheel, the sdist and the `.deb` and attaches all three to
+a GitHub release, with the changelog section of that version as the notes: see
+[the release checklist](docs/PUBLISHING.md#making-a-release).
 
 ## How this project was built (AI assistance)
 

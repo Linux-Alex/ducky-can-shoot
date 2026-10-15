@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata: what software centres (Discover, GNOME Software) show
+  about Ducky Can Shoot.  Keep the <id> identical to the desktop file name and
+  add a <release> for every published version.
+-->
+<component type="desktop-application">
+  <id>org.kde.dcs</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Ducky Can Shoot</name>
+  <summary>Scan a USB medium for malware, archive it, share it and mail the verdict</summary>
+
+  <description>
+    <p>
+      Ducky Can Shoot (DCS) triages removable media: pick a plugged-in stick, scan
+      every file with ClamAV and a built-in heuristic engine aimed at USB attacks,
+      archive the medium into one image, upload that image to a free host and email
+      the verdict, with the download link when the medium is safe.
+    </p>
+    <p>
+      If anything malicious is found, nothing is archived and nothing is uploaded,
+      so malware never leaves the machine that owns the medium. Every stage reports
+      what it did, why it was skipped and what it could not cover.
+    </p>
+    <p>
+      The interface is Qt Quick with Kirigami, so it follows the Plasma colour
+      scheme and icon theme; the same pipeline is available as the `dcs` command
+      for scripts.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.kde.dcs.desktop</launchable>
+  <provides>
+    <binary>dcs</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+    <category>Security</category>
+    <category>System</category>
+  </categories>
+
+  <keywords>
+    <keyword>usb</keyword>
+    <keyword>malware</keyword>
+    <keyword>clamav</keyword>
+    <keyword>scan</keyword>
+    <keyword>forensics</keyword>
+  </keywords>
+
+  <developer id="io.github.linux-alex">
+    <name>Ducky Can Shoot contributors</name>
+  </developer>
+
+  <url type="homepage">https://github.com/Linux-Alex/ducky-can-shoot</url>
+  <url type="bugtracker">https://github.com/Linux-Alex/ducky-can-shoot/issues</url>
+  <url type="help">https://github.com/Linux-Alex/ducky-can-shoot/tree/main/docs</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The live view: seven stages, counters and the findings as they appear</caption>
+      <image>https://raw.githubusercontent.com/Linux-Alex/ducky-can-shoot/main/docs/images/live-view.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A clean verdict with the share link</caption>
+      <image>https://raw.githubusercontent.com/Linux-Alex/ducky-can-shoot/main/docs/images/result-view.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Settings, including what happens when a medium is plugged in</caption>
+      <image>https://raw.githubusercontent.com/Linux-Alex/ducky-can-shoot/main/docs/images/settings-view.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.1.0" date="2026-01-15">
+      <description>
+        <p>First release: the headless core, the two scan engines, archiving,
+        seven upload hosts, reports, email and the Kirigami interface.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+</component>

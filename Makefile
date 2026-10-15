@@ -7,7 +7,7 @@ RUFF ?= ruff
 PYTHONPATH := src$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 .DEFAULT_GOAL := help
-.PHONY: help run cli test test-gui lint format build install uninstall doctor clean screenshots icons
+.PHONY: help run cli test test-gui lint format build deb version install uninstall doctor clean screenshots icons
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -48,6 +48,12 @@ screenshots: ## Re-render the documentation screenshots (offscreen)
 
 icons: ## Re-render the application icons at every size (needs an SVG renderer)
 	./scripts/make-icons.sh
+
+deb: ## Build the Debian package into dist/ (arch independent)
+	./scripts/build-deb.sh
+
+version: ## Move the changelog to a release and bump the version (VERSION=0.2.0)
+	./scripts/bump-version.py $(VERSION)
 
 clean: ## Remove caches and build artefacts
 	rm -rf build dist *.egg-info .pytest_cache .ruff_cache .mypy_cache

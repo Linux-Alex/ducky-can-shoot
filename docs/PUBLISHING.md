@@ -37,19 +37,71 @@ To make the repository show the right language mix, nothing needs doing:
 `.gitattributes` marks the QML interface as its own language and keeps the
 documentation out of the statistics.
 
-## First release
+## Making a release
+
+Everything is driven by the tag. One command moves the version, then two push the
+tag and the [release workflow](../.github/workflows/release.yml) does the rest:
 
 ```bash
-# CHANGELOG.md already has a section for 0.1.0
+./scripts/bump-version.py 0.2.0     # or: make version VERSION=0.2.0
+```
+
+That one command
+
+- bumps `__version__` in `src/dcs/version.py` (the single source of truth),
+- bumps `version` in `pyproject.toml`,
+- adds a `<release version="0.2.0" date="...">` entry at the top of
+  `packaging/org.kde.dcs.metainfo.xml`, which is what software centres show,
+- turns the changelog's `[Unreleased]` section into `## [0.2.0] - <date>`, opens
+  a fresh empty `[Unreleased]` above it and repoints the comparison links.
+
+Then:
+
+```bash
+make test                           # the suite, before anything else
+git diff                            # review what moved
+git commit -am "Ducky Can Shoot 0.2.0"
+git push
+
+git tag -a v0.2.0 -m "Ducky Can Shoot 0.2.0"
+git push origin v0.2.0              # <- this is the release
+```
+
+The workflow then
+
+1. builds the sdist and the wheel and checks that the wheel really carries the
+   QML interface,
+2. builds the `.deb` (`scripts/build-deb.sh`), extracts it and runs the packaged
+   `dcs` from the extracted tree, so a package that cannot find its interface
+   fails the release instead of reaching a user,
+3. creates a **GitHub release** named after the tag, whose body is the changelog
+   section for that version plus an "Installation" section
+   (`scripts/changelog-for-tag.py`), with `ducky_can_shoot-0.2.0-py3-none-any.whl`,
+   `ducky_can_shoot-0.2.0.tar.gz` and `ducky-can-shoot_0.2.0-1_all.deb` attached.
+
+You can watch it under **Actions**; when it finishes, the files are on
+**Releases**. Nothing else to upload, and no local build step is required.
+
+### Doing it by hand instead
+
+If you would rather not use the workflow: run `make deb` and `python3 -m build`,
+then on GitHub open **Releases -> Draft a new release**, pick or create the tag
+(`v0.2.0`), write the notes, drag `dist/ducky_can_shoot-0.2.0-py3-none-any.whl`,
+`dist/ducky_can_shoot-0.2.0.tar.gz` and
+`dist/ducky-can-shoot_0.2.0-1_all.deb` into the attachment box and press
+**Publish release**. Attaching the files by hand to a tag that also triggered the
+workflow would publish each artefact twice, so pick one route.
+
+### The very first release
+
+The 0.1.0 section already exists in the changelog, so the first release is just:
+
+```bash
 git tag -a v0.1.0 -m "Ducky Can Shoot 0.1.0"
 git push origin v0.1.0
 ```
 
-The Release workflow builds the sdist and the wheel, checks that the wheel really
-contains the QML interface and the hash list, and attaches both to a GitHub
-release whose body comes from the matching CHANGELOG section (see
-`scripts/changelog-for-tag.py`). For the next release, add a section for the new
-version to CHANGELOG.md first and tag it.
+Use `./scripts/bump-version.py` from the second release onwards.
 
 ## Continuous integration
 

@@ -101,8 +101,10 @@ What "done" means, in order of increasing effort:
   available on distributions that do not package it in the right versions.
 - An AppImage for the same reason, with a documented limitation: the AppImage
   cannot provide `udisksctl`, `clamscan` or `zip`, so it must use the host's.
-- Distribution packaging (Debian, Fedora) that ships the CLI as `dcs` and the GUI
-  separately, since the GUI drags in Qt and Kirigami.
+- Distribution packaging for Fedora and Arch as well: the Debian package exists
+  (`make deb`), and the same script is the template for the others. The CLI and
+  the GUI travel in one package, since the GUI only drags in Qt and Kirigami
+  through its dependencies.
 - A release workflow that builds the artefacts, runs the test suite against them
   and attaches the checksums to the release.
 

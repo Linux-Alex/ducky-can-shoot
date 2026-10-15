@@ -61,6 +61,23 @@ change between minor releases; each such change is listed below.
 
 ### Added
 
+- **A Debian package.** `make deb` (or `scripts/build-deb.sh`) builds
+  `dist/ducky-can-shoot_<version>-1_all.deb`: architecture independent, bundling
+  nothing, depending on the distribution's Python, PyQt6, Kirigami and Qt SVG
+  plugins. It installs `dcs` and `dcs-gui` in `/usr/bin`, the desktop entry, the
+  icon set, the AppStream metadata, a man page and
+  `/etc/xdg/autostart/org.kde.dcs.watch.desktop`, so the USB watcher can run from
+  login on a system wide installation too (it stays inactive until a watch mode is
+  enabled). Maintenance scripts refresh the desktop and icon caches, the package
+  carries `md5sums` and a machine readable copyright, and the CI builds and
+  smoke tests it on every push and attaches it to every release.
+- **A release helper.** `scripts/bump-version.py 0.2.0` (or
+  `make version VERSION=0.2.0`) bumps the version in `src/dcs/version.py` and
+  `pyproject.toml`, adds the release to the AppStream metadata and turns the
+  changelog's `[Unreleased]` section into the new version with a fresh empty one
+  above it - the four places a version lives, in one command, so a release cannot
+  go out half bumped.
+
 - **The settings page keeps its buttons where you can see them, and "Test SMTP"
   tests what is on screen.** The form is much taller than the window, so the
   "Save settings" button at the end of it was easy to miss: changes could be left

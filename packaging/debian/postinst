@@ -1,0 +1,21 @@
+#!/bin/sh
+# Refresh the caches that mention this package.  Nothing here is fatal: a
+# package that installs must not fail because a cache tool is missing.
+set -e
+
+if [ "$1" = "configure" ]; then
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database -q /usr/share/applications || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+    fi
+    # Compile the bytecode the way Debian expects (dh_python3 would emit this):
+    # without it the interpreter writes __pycache__ at run time, as root, and
+    # dpkg then refuses to remove that directory again.
+    if command -v py3compile >/dev/null 2>&1; then
+        py3compile -p ducky-can-shoot || true
+    fi
+fi
+
+exit 0

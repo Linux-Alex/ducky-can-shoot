@@ -1,0 +1,29 @@
+#!/bin/sh
+# The configuration and the reports belong to the user and are never touched by
+# the package: only the desktop cache is refreshed, so the entry disappears from
+# the menu.
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database -q /usr/share/applications || true
+    fi
+    if command -v py3clean >/dev/null 2>&1; then
+        py3clean -p ducky-can-shoot || true
+    fi
+    # py3clean -p leaves the bytecode that py3compile wrote at install time
+    # behind (it only removes what it can map back to a file that is still
+    # listed), so the tree is cleaned here as well - only __pycache__ becomes
+    # removed, and then only directories that are already empty.
+    if [ -d /usr/lib/python3/dist-packages/dcs ]; then
+        find /usr/lib/python3/dist-packages/dcs -name "__pycache__" -type d -prune \
+            -exec rm -rf {} + 2>/dev/null || true
+        # one rmdir per directory, straight away: with "-exec ... +" find tests
+        # every directory before it removes any of them, so a parent that is
+        # still holding a child is never cleaned
+        find /usr/lib/python3/dist-packages/dcs -depth -type d -empty \
+            -exec rmdir {} \; 2>/dev/null || true
+    fi
+fi
+
+exit 0

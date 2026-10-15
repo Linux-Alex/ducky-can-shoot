@@ -54,6 +54,31 @@ jobs:
           EOF
           python -c "import dcs.core.config as c, tomllib; print('default config keys:', len(tomllib.loads(c.dumps_toml(c.AppConfig().to_dict()))))"
 
+      - name: Build the Debian package
+        run: |
+          # dpkg-deb is part of dpkg and therefore already on the runner; the
+          # script takes the wheel that was just built and lays the package out
+          # the way a Debian system expects it.
+          ./scripts/build-deb.sh
+          dpkg-deb --info dist/*.deb | sed -n '1,12p'
+          echo "files in the package: $(dpkg-deb --contents dist/*.deb | wc -l)"
+
+      - name: Check that the package installs the interface
+        run: |
+          # extract it and run it from the extracted tree: no root needed, and it
+          # proves the wheel inside the package can find its QML
+          ROOT="$(mktemp -d)"
+          dpkg-deb --extract dist/*.deb "$ROOT"
+          PYTHONPATH="$ROOT/usr/lib/python3/dist-packages" python -m dcs version
+          PYTHONPATH="$ROOT/usr/lib/python3/dist-packages" python - <<'EOF'
+          import os
+          import dcs
+
+          qml = os.path.join(os.path.dirname(dcs.__file__), "gui", "qml")
+          assert os.path.isfile(os.path.join(qml, "Main.qml")), qml
+          print("QML interface inside the package:", qml)
+          EOF
+
       - name: Store the artefacts
         uses: actions/upload-artifact@v7
         with:
@@ -75,6 +100,33 @@ jobs:
 
       - name: Extract the changelog section for this tag
         run: python3 scripts/changelog-for-tag.py "${GITHUB_REF_NAME}" --output release-notes.md
+
+      - name: Add the installation section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cat >> release-notes.md <<EOF
+
+          ## Installation
+
+          Debian, Ubuntu, Kubuntu and anything else with apt:
+
+          ```bash
+          sudo apt install ./ducky-can-shoot_${version}-1_all.deb
+          ```
+
+          Any distribution with Python 3.11 and PyQt6:
+
+          ```bash
+          pip install ducky_can_shoot-${version}-py3-none-any.whl
+          ```
+
+          Or from the source tree, without root:
+
+          ```bash
+          git clone https://github.com/Linux-Alex/ducky-can-shoot.git
+          cd ducky-can-shoot && ./scripts/install.sh
+          ```
+          EOF
 
       - name: Create the release
         env:

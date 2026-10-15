@@ -1,0 +1,35 @@
+Package: ducky-can-shoot
+Version: @VERSION@-@REVISION@
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Linux-Alex <alex.marinic22@gmail.com>
+Homepage: https://github.com/Linux-Alex/ducky-can-shoot
+Vcs-Git: https://github.com/Linux-Alex/ducky-can-shoot.git
+Depends: python3 (>= 3.11),
+ python3-pyqt6 (>= 6.5),
+ python3-pyqt6.qtqml,
+ python3-pyqt6.qtquick,
+ python3-requests,
+ qml6-module-org-kde-kirigami,
+ qml6-module-qtquick-controls,
+ qml6-module-qtquick-layouts,
+ qml6-module-qtquick-dialogs,
+ qml6-module-qtquick-templates,
+ qml6-module-qtqml-workerscript,
+ libqt6svg6,
+ qt6-svg-plugins,
+ libglib2.0-bin,
+ zip,
+ udisks2,
+ util-linux
+Recommends: clamav, clamav-daemon, clamav-freshclam, p7zip-full, libnotify-bin
+Description: USB malware triage: scan, archive, upload and notify
+ Ducky Can Shoot triages removable media: it scans every file on a USB stick with
+ ClamAV and a built-in heuristic engine, archives the medium into one image,
+ uploads that image to a free host and emails the verdict, with the download link
+ when the medium is safe.
+ .
+ If a threat is found, nothing is archived and nothing is uploaded, so malware
+ never leaves the machine that owns the medium.  The interface is Qt Quick with
+ Kirigami; the same pipeline is available as the dcs command.

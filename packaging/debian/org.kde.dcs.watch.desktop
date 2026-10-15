@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Ducky Can Shoot USB watcher
+Comment=Notify or open Ducky Can Shoot when a USB medium is plugged in
+Exec=dcs watch
+Icon=org.kde.dcs
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
