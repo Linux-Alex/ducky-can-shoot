@@ -23,7 +23,8 @@ PREFIX="${PREFIX:-$HOME/.local}"
 VENV="${VENV:-$HOME/.local/share/dcs/venv}"
 BINDIR="$PREFIX/bin"
 APPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-ICONDIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+ICONROOT="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
+ICONDIR="$ICONROOT/scalable/apps"
 
 #: off (the default) | notify | open | open_run
 WATCH_MODE="${WATCH_MODE:-}"
@@ -70,12 +71,23 @@ mkdir -p "$BINDIR"
 ln -sf "$VENV/bin/dcs" "$BINDIR/dcs"
 ln -sf "$VENV/bin/dcs-gui" "$BINDIR/dcs-gui"
 
-say "installing the desktop entry and the icon"
+say "installing the desktop entry and the icons"
 mkdir -p "$APPDIR" "$ICONDIR"
 install -m 644 packaging/org.kde.dcs.desktop "$APPDIR/org.kde.dcs.desktop"
+
+# The scalable files are the ones a modern desktop uses, including the symbolic
+# one for monochrome places; the bitmaps are the fallback for launchers and
+# docks that never look at scalable/ at all.
 install -m 644 packaging/icons/hicolor/scalable/apps/org.kde.dcs.svg "$ICONDIR/org.kde.dcs.svg"
+install -m 644 packaging/icons/hicolor/scalable/apps/org.kde.dcs-symbolic.svg \
+    "$ICONDIR/org.kde.dcs-symbolic.svg"
+for size in 16 22 24 32 48 64 128 256 512; do
+    install -d "$ICONROOT/${size}x${size}/apps"
+    install -m 644 "packaging/icons/hicolor/${size}x${size}/apps/org.kde.dcs.png" \
+        "$ICONROOT/${size}x${size}/apps/org.kde.dcs.png"
+done
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPDIR" || true
-command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" 2>/dev/null || true
+command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "$ICONROOT" 2>/dev/null || true
 
 say "writing a default configuration if there is none"
 "$BINDIR/dcs" config init >/dev/null || true

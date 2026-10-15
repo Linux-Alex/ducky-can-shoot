@@ -7,7 +7,7 @@ RUFF ?= ruff
 PYTHONPATH := src$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 .DEFAULT_GOAL := help
-.PHONY: help run cli test test-gui lint format build install uninstall doctor clean screenshots
+.PHONY: help run cli test test-gui lint format build install uninstall doctor clean screenshots icons
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -45,6 +45,9 @@ doctor: ## Check every dependency and the configuration
 
 screenshots: ## Re-render the documentation screenshots (offscreen)
 	PYTHONPATH=$(PYTHONPATH) QT_QPA_PLATFORM=offscreen $(PYTHON) scripts/make-screenshots.py
+
+icons: ## Re-render the application icons at every size (needs an SVG renderer)
+	./scripts/make-icons.sh
 
 clean: ## Remove caches and build artefacts
 	rm -rf build dist *.egg-info .pytest_cache .ruff_cache .mypy_cache

@@ -1164,3 +1164,37 @@ def test_the_watcher_is_not_started_while_its_mode_is_off(backend: Backend) -> N
     assert backend.watcher.active is False
     assert backend.watcher.poll() == []
 
+
+def test_the_about_page_shows_the_shipped_icon(backend: Backend, qapp: Any, qt_messages: list[str]) -> None:
+    """The artwork is an SVG and Qt only draws it with the SVG image plugin.
+
+    A missing qt6-svg-plugins (a separate package from libqt6svg6) leaves the
+    About page with an empty square and a warning nobody reads, so the status of
+    the image is asserted here instead.
+    """
+    from PyQt6.QtCore import QObject
+
+    engine, window, _page = open_settings(backend, qapp)
+    window.setProperty("tabIndex", 4)  # the About page
+    for _ in range(40):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    icon = window.findChild(QObject, "aboutIcon")
+    assert icon is not None, "the About page does not show the application icon"
+    assert icon.property("source").toString().endswith("icons/dcs.svg")
+    assert icon.property("implicitWidth") > 0
+    assert icon.property("implicitHeight") > 0
+
+    about = next(
+        child
+        for child in window.findChildren(QObject)
+        if child.metaObject().className().startswith("AboutView")
+    )
+    assert about.property("iconLoaded") is True, (
+        "the icon did not load; is the Qt SVG image plugin (qt6-svg-plugins) installed?"
+    )
+
+    gui_app.teardown_engine(engine)
+
+

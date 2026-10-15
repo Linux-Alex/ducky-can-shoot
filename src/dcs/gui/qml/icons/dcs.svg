@@ -1,30 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <!-- Ducky Can Shoot: a shield (defence) with a USB plug inside (the medium) -->
-  <defs>
-    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#4fb8ea"/>
-      <stop offset="1" stop-color="#1d7fb8"/>
-    </linearGradient>
-    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fcfcfc"/>
-      <stop offset="1" stop-color="#c9ced3"/>
-    </linearGradient>
-  </defs>
-  <path d="M64 6 L112 22 V64 C112 92 92 112 64 122 C36 112 16 92 16 64 V22 Z"
-        fill="url(#shield)" stroke="#16648f" stroke-width="3"/>
-  <path d="M64 16 L102 29 V64 C102 87 86 103 64 112 C42 103 26 87 26 64 V29 Z"
-        fill="#ffffff" opacity="0.10"/>
-  <!-- USB connector body -->
-  <rect x="46" y="34" width="36" height="26" rx="4" fill="url(#metal)" stroke="#7a8288" stroke-width="2"/>
-  <rect x="52" y="41" width="24" height="12" rx="2" fill="#2b3136"/>
-  <circle cx="58" cy="47" r="2.4" fill="#fcfcfc"/>
-  <rect x="66" y="45" width="8" height="4" rx="1" fill="#fcfcfc"/>
-  <!-- cable -->
-  <path d="M64 60 V78" stroke="#7a8288" stroke-width="6" stroke-linecap="round"/>
-  <!-- padlock shackle hint: the scan result is locked in -->
-  <path d="M50 84 h28 a6 6 0 0 1 6 6 v16 a6 6 0 0 1 -6 6 h-28 a6 6 0 0 1 -6 -6 v-16 a6 6 0 0 1 6 -6 z"
-        fill="url(#metal)" stroke="#7a8288" stroke-width="2"/>
-  <path d="M56 84 v-6 a8 8 0 0 1 16 0 v6" fill="none" stroke="#e6e9ec" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="64" cy="96" r="3.4" fill="#2b3136"/>
-  <rect x="62.4" y="96" width="3.2" height="7" rx="1.6" fill="#2b3136"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Ducky Can Shoot - application icon.
+
+    A duck holding a pistol whose muzzle faces the viewer: yellow head, blue
+    wings, orange bill, dark gun with the bore in the middle.  Flat shapes on a
+    light badge, one dark outline, no gradients - the whole thing has to be
+    readable when a launcher draws it at 16 px, and the badge keeps the dark gun
+    visible on a dark panel.
+  -->
+  <title>Ducky Can Shoot</title>
+
+  <circle cx="256" cy="256" r="244" fill="#FBFBFB" stroke="#0d1020" stroke-width="14"/>
+
+  <g stroke="#0d1020" stroke-width="11" stroke-linejoin="round" stroke-linecap="round">
+    <!-- chest and head as a single silhouette -->
+    <path fill="#FED329" d="M 256 60 C 314 60 360 106 360 164 C 360 194 350 220 334 238
+      C 372 252 392 292 392 340 C 392 400 330 446 256 446 C 182 446 120 400 120 340
+      C 120 292 140 252 178 238 C 162 220 152 194 152 164 C 152 106 198 60 256 60 Z"/>
+
+    <!-- the pistol: slide, then the muzzle facing the viewer -->
+    <path fill="#191B26" d="M 158 350 C 158 326 202 314 256 314 C 310 314 354 326 354 350
+      L 354 376 L 158 376 Z"/>
+    <circle fill="#191B26" cx="256" cy="416" r="78"/>
+    <circle fill="#5A6076" cx="256" cy="416" r="56" stroke="none"/>
+    <circle fill="#05060A" cx="256" cy="416" r="38" stroke="none"/>
+
+    <!-- wings, in front of the gun, holding it -->
+    <ellipse fill="#0A66C8" cx="128" cy="398" rx="52" ry="62" transform="rotate(16 128 398)"/>
+    <ellipse fill="#0A66C8" cx="384" cy="398" rx="52" ry="62" transform="rotate(-16 384 398)"/>
+
+    <!-- bill -->
+    <path fill="#F59E0B" d="M 186 232 C 226 216 286 216 326 232 C 326 274 296 308 256 308
+      C 216 308 186 274 186 232 Z"/>
+
+    <!-- eyes -->
+    <ellipse fill="#0d1020" cx="204" cy="168" rx="19" ry="24"/>
+    <ellipse fill="#0d1020" cx="308" cy="168" rx="19" ry="24"/>
+  </g>
+
+  <!-- detail that the small sizes do not need -->
+  <g fill="none" stroke="#0d1020" stroke-linecap="round">
+    <path stroke="#C97A08" stroke-width="9" d="M 196 262 C 232 278 280 278 316 262"/>
+    <path stroke-width="6" stroke="#C3C8D6" d="M 200 372 A 78 78 0 0 0 312 372"/>
+    <path stroke-width="13" d="M 176 126 L 230 146"/>
+    <path stroke-width="13" d="M 336 126 L 282 146"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="211" cy="157" r="7"/>
+    <circle cx="315" cy="157" r="7"/>
+  </g>
 </svg>

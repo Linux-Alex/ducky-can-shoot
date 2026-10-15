@@ -130,6 +130,12 @@ change between minor releases; each such change is listed below.
   warning instead of being stored as a string, and the TOML writer escapes
   control characters, so a value containing a newline no longer produces a file
   that tomllib rejects (which silently reset every setting).
+- **The package list was missing the Qt SVG plugins.** `libqt6svg6` is the
+  library, but the icon engine and the image format plugin that actually draw an
+  SVG live in `qt6-svg-plugins`, a separate package. An installation that
+  followed the README showed empty squares where the icons and the application
+  artwork should be. The README, the CI job and the troubleshooting page now say
+  so, and a test loads the artwork through Qt to catch a missing plugin.
 - **The CI job that tests the real interface no longer fails on a missing
   package.** It installed Kirigami 6 from apt on `ubuntu-latest`, which still
   means Ubuntu 24.04 - a release that has no KDE Frameworks 6 packages at all,

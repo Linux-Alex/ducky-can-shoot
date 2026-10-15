@@ -9,6 +9,9 @@ Controls.ScrollView {
     clip: true
     contentWidth: availableWidth
 
+    //! true once the artwork is decoded (an SVG needs the Qt SVG image plugin)
+    readonly property bool iconLoaded: aboutIcon.status === Image.Ready
+
     ColumnLayout {
         width: view.availableWidth
         spacing: Kirigami.Units.largeSpacing
@@ -17,19 +20,46 @@ Controls.ScrollView {
             Layout.preferredHeight: Kirigami.Units.largeSpacing
         }
 
-        Kirigami.Heading {
-            Layout.leftMargin: Kirigami.Units.gridUnit
-            level: 1
-            text: backend.appName
-        }
-
-        Controls.Label {
+        // The artwork the launcher shows, next to the name.  The file travels
+        // inside the package (qml/icons/dcs.svg), so this works from a checkout
+        // and from an installed wheel alike.
+        RowLayout {
+            Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.gridUnit
             Layout.rightMargin: Kirigami.Units.gridUnit
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            opacity: 0.8
-            text: "Version " + backend.appVersion + " - free software under the GPL-3.0-or-later."
+            spacing: Kirigami.Units.largeSpacing
+
+            Image {
+                id: aboutIcon
+                objectName: "aboutIcon"
+                source: "../icons/dcs.svg"
+                sourceSize.width: Kirigami.Units.gridUnit * 4
+                sourceSize.height: Kirigami.Units.gridUnit * 4
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+                Layout.alignment: Qt.AlignTop
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 1
+                    text: backend.appName
+                }
+
+                Controls.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    opacity: 0.8
+                    text: "Version " + backend.appVersion
+                          + " - free software under the GPL-3.0-or-later."
+                }
+            }
         }
 
         Kirigami.Card {

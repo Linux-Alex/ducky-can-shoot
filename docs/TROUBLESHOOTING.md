@@ -73,6 +73,18 @@ On Ubuntu that means 26.04 or newer. Ubuntu 24.04 carries no KDE Frameworks 6
 packages, so no amount of Qt 6 packages will make the interface start there; use
 `dcs` from the command line on such a system.
 
+If the window opens but **the logo and every icon are empty squares**, the Qt SVG
+*plugins* are missing. They are a separate package from the SVG library:
+
+```bash
+sudo apt install qt6-svg-plugins     # Debian / Ubuntu
+sudo dnf install qt6-qtsvg           # Fedora
+sudo pacman -S qt6-svg               # Arch
+```
+
+Qt draws themed icons, the application artwork and any SVG in the interface with
+those plugins, so nothing that ships as a vector is visible without them.
+
 `dcs doctor` reports which part is missing.
 
 ### ClamAV is missing

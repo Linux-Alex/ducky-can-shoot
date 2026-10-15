@@ -13,6 +13,11 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="Pull requests welcome"></a>
 </p>
 
+<p align="center">
+  <img src="packaging/icons/hicolor/256x256/apps/org.kde.dcs.png" width="104" height="104"
+       alt="The Ducky Can Shoot icon: a duck holding a pistol whose muzzle faces you">
+</p>
+
 <h1 align="center">Ducky Can Shoot</h1>
 
 <p align="center"><b>USB malware triage for Linux.</b><br>
@@ -74,7 +79,7 @@ sudo apt install python3 python3-pyqt6 python3-pyqt6.qtqml python3-pyqt6.qtquick
   qml6-module-org-kde-kirigami qml6-module-qtquick-controls \
   qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \
   qml6-module-qtquick-templates qml6-module-qtqml-workerscript \
-  libqt6svg6 zip udisks2 util-linux
+  libqt6svg6 qt6-svg-plugins zip udisks2 util-linux
 
 # Fedora
 sudo dnf install python3 python3-pyqt6 kf6-kirigami qt6-qtdeclarative zip udisks2 util-linux
