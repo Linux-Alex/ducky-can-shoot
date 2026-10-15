@@ -16,7 +16,12 @@ Global options, valid for every subcommand:
 
 Running `dcs` with no subcommand is the same as `dcs gui`.
 
-### `dcs gui`
+### `dcs gui [--device NODE] [--autorun]`
+
+| Option | Meaning |
+| --- | --- |
+| `--device NODE` | Open the interface on this medium (`/dev/sdb1`, a label or a mount point) and mount it if needed. |
+| `--autorun` | Start the job on that medium as soon as the window is up. Used by `dcs watch` in `open_run` mode. |
 
 Starts the graphical interface. If PyQt6 is missing, the command explains what to
 install and exits with code 2. Accepts the global options only.
@@ -115,23 +120,69 @@ sudo collects the password in this terminal, so DCS never handles it.
 
 Exit code 0 when the installation succeeded, 2 when it failed or was cancelled.
 
-### `dcs config [init|show|path] [--show-secrets]`
+### `dcs config [init|show|path|set] [--show-secrets] [--options]`
 
 | Action | Meaning |
 | --- | --- |
 | `show` (the default) | Print the effective configuration as TOML, with secrets masked. |
 | `init` | Write a default configuration file if none exists yet. |
 | `path` | Print the configuration file that is in use. |
+| `set KEY VALUE` | Change one dotted option and save the file. |
 
 `--show-secrets` prints stored values unmasked; do not pipe that into a log.
+`--options` prints every settable option name, one per line.
+
+`set` coerces the value the same way the loader does (`"false"` becomes `false`,
+`"5"` becomes `5`, a comma separated list becomes a list) and **refuses** a value
+the configuration itself calls broken, leaving the old value in place:
 
 ```bash
 dcs config path
 dcs config show
-dcs config init
+dcs config --options
+dcs config set watch.mode notify
+dcs config set email.to_addrs "me@example.org, ops@example.org"
+dcs config set archive.format rar        # error: must be zip or 7z (exit 2)
 ```
 
-Exit code: 0 normally, 2 for an unknown action.
+Exit code: 0 normally, 2 for an unknown action, an unknown option or a value that
+was refused.
+
+### `dcs watch [--mode MODE] [--interval SECONDS] [--once] [--status] [--json]`
+
+Listens for media that are plugged in *while this command runs* and does what
+`watch.mode` says (see [the `[watch]` section](CONFIGURATION.md#watch)). This is
+the command the autostart entry runs; it needs no root, no udev rule and no D-Bus
+connection, only `lsblk`.
+
+| Option | Meaning |
+| --- | --- |
+| `--mode off\|notify\|open\|open_run` | Override the configured mode for this run only. |
+| `--interval SECONDS` | Override `watch.interval_s`. |
+| `--once` | Print the media attached right now and exit (a snapshot, not a listener). |
+| `--status` | Print the mode, the autostart file, the interval and whether an interface is already running. |
+| `--json` | One JSON object per medium, for scripts. |
+
+Modes:
+
+| Mode | What the watcher does with a new medium |
+| --- | --- |
+| `off` | Exits immediately with a note about how to turn it on (so the autostart entry is harmless). |
+| `notify` | Shows a notification with an **Open Ducky Can Shoot** button (`notify-send --wait`); pressing it starts `dcs gui --device NODE`. |
+| `open` | Starts `dcs gui --device NODE`. |
+| `open_run` | Starts `dcs gui --device NODE --autorun`, which mounts the medium and runs the whole job. |
+
+While a window is open, `dcs watch` stays quiet: the interface watches for itself,
+so a medium never produces two notifications or two jobs.
+
+```bash
+dcs watch --status                            # mode, autostart file, running window
+dcs watch                                     # listen with the configured mode
+dcs watch --mode notify --interval 1          # try it out without saving anything
+dcs watch --once --json                       # what is attached right now
+```
+
+Exit code: 0 normally, 2 for an unknown mode.
 
 ### `dcs engines [--json]`
 

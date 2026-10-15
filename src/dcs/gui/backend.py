@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import threading
+from dataclasses import fields, replace
 from typing import Any
 
 from PyQt6.QtCore import (
@@ -23,8 +24,16 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QClipboard, QDesktopServices, QGuiApplication
 
-from dcs.core.config import AppConfig, load_config, write_default_config
+from dcs.core import autostart
+from dcs.core.config import (
+    WATCH_MODES,
+    AppConfig,
+    EmailConfig,
+    load_config,
+    write_default_config,
+)
 from dcs.core.device import (
+    find_device,
     list_removable_devices,
     mount_device,
     unmount_device,
@@ -33,9 +42,11 @@ from dcs.core.events import STAGE_ORDER
 from dcs.core.installer import Installer, build_plan, manual_instructions
 from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import get_logger, log_ring
+from dcs.core.notify.desktop import ACTION_OPEN, DesktopNotifier
 from dcs.core.pipeline import JobRequest
 from dcs.core.scanner import Scanner
 from dcs.core.upload import provider_catalog
+from dcs.core.watch import MODE_DESCRIPTIONS, MODE_LABELS
 from dcs.gui.models import (
     DevicesModel,
     FindingsModel,
@@ -44,6 +55,7 @@ from dcs.gui.models import (
     TextLinesModel,
     ThroughputModel,
 )
+from dcs.gui.watcher import UsbWatcher, device_summary
 from dcs.gui.worker import PipelineWorker
 from dcs.version import APP_HOMEPAGE, APP_NAME, __version__
 
@@ -88,6 +100,11 @@ class Backend(QObject):
     busyChanged = pyqtSignal()
     toast = pyqtSignal(str, str)  # level, message
     testResult = pyqtSignal(str, bool, str)  # what, ok, message
+    #: a medium was plugged in while the interface was open
+    deviceInserted = pyqtSignal("QVariantMap")
+    pendingDeviceChanged = pyqtSignal()
+    settingsSaved = pyqtSignal(bool, str)  # ok, message
+    watchStateChanged = pyqtSignal()
     installStateChanged = pyqtSignal()
     installFinished = pyqtSignal(object)
     #: emitted from the installer thread; the model lives in the GUI thread, so
@@ -132,6 +149,18 @@ class Backend(QObject):
         self._install_thread: threading.Thread | None = None
         self._install_state = "idle"
         self._install_outcome: dict[str, Any] = {}
+        #: the medium a notification or an automatic run is waiting for
+        self._pending_device: dict[str, Any] = {}
+        #: last save outcome, shown next to the save button instead of only in
+        #: the window wide toast (which is easy to miss on a long page)
+        self._save_message = ""
+        self._save_ok = True
+
+        # Watches for media plugged in while the window is open.  The mode is
+        # "off" by default; apply_config() only starts the timer when the user
+        # asked for it (see the USB detection card in the settings page).
+        self.watcher = UsbWatcher(self.config, self)
+        self.watcher.inserted.connect(self._on_device_inserted)
 
         log_ring().add_listener(self._on_log_record)
         self.refreshDevices()
@@ -438,11 +467,29 @@ class Backend(QObject):
         self.config.merge(values)
         try:
             path = self.config.save()
-            self.toast.emit("info", f"Settings saved to {path}")
         except OSError as exc:
+            self._save_ok = False
+            self._save_message = f"Could not save: {exc}"
             self.toast.emit("error", f"Could not save the settings: {exc}")
+        else:
+            self._save_ok = True
+            self._save_message = f"Saved to {path}"
+            self.toast.emit("info", f"Settings saved to {path}")
+        self._apply_watch_settings()
         self.refreshEngineStatus()
         self.settingsChanged.emit()
+        self.settingsSaved.emit(self._save_ok, self._save_message)
+
+    def _apply_watch_settings(self) -> None:
+        """Follow the USB settings at once: the timer and the autostart entry."""
+        self.watcher.apply_config(self.config)
+        wanted = bool(self.config.watch.autostart) and self.config.watch.mode != "off"
+        if autostart.sync(wanted):
+            log.info(
+                "autostart entry %s",
+                "installed" if autostart.is_enabled() else "removed",
+            )
+        self.watchStateChanged.emit()
 
     @pyqtSlot()
     def reloadSettings(self) -> None:
@@ -453,6 +500,177 @@ class Backend(QObject):
     @pyqtSlot(result=str)
     def validationProblems(self) -> str:
         return "\n".join(self.config.validation_problems())
+
+    # ------------------------------------------------------------------
+    # settings feedback, and the USB watcher
+    # ------------------------------------------------------------------
+    @pyqtProperty(str, notify=settingsChanged)
+    def saveMessage(self) -> str:
+        """Where the last save landed, shown next to the save button."""
+        return self._save_message
+
+    @pyqtProperty(bool, notify=settingsChanged)
+    def saveOk(self) -> bool:
+        return self._save_ok
+
+    @pyqtProperty("QVariantMap", notify=pendingDeviceChanged)
+    def pendingDevice(self) -> dict[str, Any]:
+        """The medium the interface is offering to triage (empty when none)."""
+        return self._pending_device
+
+    @pyqtProperty(str, notify=watchStateChanged)
+    def watchMode(self) -> str:
+        return self.config.watch.mode
+
+    @pyqtProperty("QVariantList", constant=True)
+    def watchModes(self) -> list[dict[str, Any]]:
+        """The four reactions, for the combo box in the settings page."""
+        return [
+            {"value": mode, "label": MODE_LABELS[mode], "description": MODE_DESCRIPTIONS[mode]}
+            for mode in WATCH_MODES
+        ]
+
+    @pyqtProperty(bool, notify=watchStateChanged)
+    def watchActive(self) -> bool:
+        """True while this window is listening for new media."""
+        return self.watcher.active
+
+    @pyqtProperty(bool, notify=watchStateChanged)
+    def watchAutostart(self) -> bool:
+        return autostart.is_enabled()
+
+    @pyqtProperty(str, constant=True)
+    def autostartPath(self) -> str:
+        return str(autostart.autostart_path())
+
+    @pyqtSlot()
+    def acceptPendingDevice(self) -> None:
+        """Select the medium that was plugged in (mounting it if needed)."""
+        payload = dict(self._pending_device)
+        node = str(payload.get("node") or "")
+        if not node:
+            return
+        if not self.openDevice(node):
+            return
+        self.toast.emit("info", f"{device_summary(payload)} is selected")
+
+    @pyqtSlot()
+    def runPendingDevice(self) -> None:
+        """Start the whole job on the medium that was plugged in."""
+        payload = dict(self._pending_device)
+        node = str(payload.get("node") or "")
+        if not node:
+            return
+        if self.openDevice(node, autorun=True):
+            self._pending_device = {}
+            self.pendingDeviceChanged.emit()
+
+    @pyqtSlot()
+    def dismissPendingDevice(self) -> None:
+        self._pending_device = {}
+        self.pendingDeviceChanged.emit()
+
+    @pyqtSlot(str, result=bool)
+    def openDevice(self, node: str, autorun: bool = False) -> bool:
+        """Select a medium by node, mount it when needed, optionally run the job."""
+        device = find_device(node)
+        if device is None:
+            self.toast.emit("error", f"{node} is not a device DCS can see")
+            return False
+        if not device.mounted:
+            ok, message = mount_device(device)
+            if not ok:
+                self.toast.emit("error", f"Could not mount {device.path}: {message}")
+                return False
+            device = find_device(node) or device
+        self.refreshDevices()
+        row = self._row_for_device(device.path, device.mount_path)
+        if row >= 0:
+            self.selectDevice(row)
+        else:  # the medium is usable but lsblk did not list it as removable
+            self.setFolder(device.mount_path or device.path)
+        if autorun:
+            if self._state == RUNNING:
+                self.toast.emit("warning", "A job is already running")
+                return True
+            self.startJob(self.autoRunOptions())
+        return True
+
+    def _row_for_device(self, path: str, mount_path: str) -> int:
+        for row in range(self.devices_model.rowCount()):
+            device = self.devices_model.device_at(row)
+            if device is None:
+                continue
+            if device.path == path or (mount_path and device.mount_path == mount_path):
+                return row
+        return -1
+
+    def autoRunOptions(self) -> dict[str, Any]:
+        """Job options for an automatic run (watch.mode = open_run).
+
+        Everything the configuration enables is done without asking, because
+        nobody is at the keyboard: the archive is built, the public link is
+        created and, when a recipient is configured, the mail is sent.  Without
+        a recipient the job stops at the report and the link is shown on the
+        result page.
+        """
+        config = self.config
+        recipients = ", ".join(config.email.to_addrs)
+        return {
+            "source": self._selected_folder,
+            "label": self._source_label,
+            "scan": True,
+            "archive": config.archive.enabled,
+            "upload": config.upload.enabled,
+            "email": bool(config.email.enabled and config.email.to_addrs),
+            "recipients": recipients,
+            "dryRun": False,
+            "assumeYes": True,
+        }
+
+    def _on_device_inserted(self, payload: dict[str, Any]) -> None:
+        """React to a medium the watcher just noticed."""
+        mode = self.config.watch.mode
+        if mode == "off":
+            return
+        self._pending_device = dict(payload)
+        self.pendingDeviceChanged.emit()
+        self.deviceInserted.emit(self._pending_device)
+        if mode == "notify":
+            self.toast.emit("info", f"USB medium plugged in: {device_summary(payload)}")
+            self._notify_desktop(payload)
+            return
+        if mode == "open":
+            self.acceptPendingDevice()
+            return
+        if mode == "open_run":
+            self.toast.emit("info", f"Starting on {device_summary(payload)}")
+            self.runPendingDevice()
+
+    def _notify_desktop(self, payload: dict[str, Any]) -> None:
+        """Show a notification with an Open button; the answer opens the window.
+
+        notify-send waits for the user, so it runs on a worker thread: the
+        window must stay responsive while the notification is on screen.
+        """
+        notifier = DesktopNotifier(timeout_ms=self.config.watch.notify_timeout_ms)
+        title = f"USB medium plugged in: {payload.get('displayName') or payload.get('node')}"
+        body = (
+            f"{device_summary(payload)}. Open {APP_NAME} to scan it, archive it and mail "
+            "the verdict; nothing has been read from the medium yet."
+        )
+        def work() -> str:
+            return notifier.notify(
+                title, body, actions=((ACTION_OPEN, f"Open {APP_NAME}"),)
+            )
+
+        def answered(choice: Any) -> None:
+            if choice == ACTION_OPEN:
+                self.acceptPendingDevice()
+            elif not notifier.available():
+                self.toast.emit("warning", "Install libnotify-bin to get a notification")
+
+        self._run_async(work, answered, lambda error: log.warning("notification failed: %s", error))
 
     # ------------------------------------------------------------------
     # job control
@@ -623,18 +841,27 @@ class Backend(QObject):
             self._runners.remove(runner)
         runner.deleteLater()
 
-    @pyqtSlot()
-    def testSmtp(self) -> None:
+    @pyqtSlot("QVariantMap", result=bool)
+    def testSmtp(self, draft: dict[str, Any] | None = None) -> bool:
+        """Test the SMTP server, with the values currently in the form.
+
+        The settings page edits a draft that only reaches the config file on
+        Save.  Testing the *stored* settings while the user is looking at
+        different values is how "Test SMTP" used to fail and then succeed after
+        saving; the draft is what gets tested now, so the answer belongs to what
+        is on screen.
+        """
         from dcs.core.notify import Notifier
 
-        config = self.config.email
+        email = self._email_from_draft(draft or {})
+        password = str((draft or {}).get("password") or "") or self.config.smtp_password()
         self.toast.emit("info", "Testing the SMTP connection...")
 
         def work() -> tuple[bool, str]:
             notifier = Notifier(
-                config,
-                password=self.config.smtp_password(),
-                username=self.config.smtp_username(),
+                email,
+                password=password,
+                username=email.username or self.config.smtp_username(),
             )
             return notifier.test_connection()
 
@@ -643,6 +870,26 @@ class Backend(QObject):
             lambda result: self.testResult.emit("smtp", bool(result[0]), str(result[1])),
             lambda error: self.testResult.emit("smtp", False, error),
         )
+        return True
+
+    def _email_from_draft(self, draft: dict[str, Any]) -> EmailConfig:
+        """An EmailConfig with the stored values overlaid by the form values."""
+        known = {field_info.name for field_info in fields(EmailConfig)}
+        values: dict[str, Any] = {
+            key: value for key, value in draft.items() if key in known and key != "password"
+        }
+        recipients = values.get("to_addrs")
+        if isinstance(recipients, str):
+            values["to_addrs"] = [
+                part.strip() for part in recipients.replace(";", ",").split(",") if part.strip()
+            ]
+        if not values:
+            return self.config.email
+        try:
+            return replace(self.config.email, **values)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+            log.warning("ignoring the SMTP values in the form: %s", exc)
+            return self.config.email
 
     @pyqtSlot(str)
     def testProvider(self, provider_id: str) -> None:

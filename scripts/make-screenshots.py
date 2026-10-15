@@ -37,6 +37,7 @@ from PyQt6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PyQt6.QtQuick import QQuickWindow  # noqa: E402
 
 import dcs.core.device as device_module  # noqa: E402
+import dcs.gui.backend as backend_module  # noqa: E402
 from dcs.core.config import load_config  # noqa: E402
 from dcs.core.device import BlockDevice  # noqa: E402
 from dcs.gui.app import find_qml_imports, qml_directory  # noqa: E402
@@ -77,7 +78,26 @@ DEMO_DEVICES = (
 )
 
 
+class SilentNotifier:
+    """Stands in for notify-send while the screenshots are taken.
+
+    The script runs on a real desktop: taking a screenshot must not pop a
+    notification on the maintainer's screen, and notify-send would also block
+    this process waiting for an answer nobody is going to give.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        pass
+
+    def available(self) -> bool:
+        return False
+
+    def notify(self, *args: object, **kwargs: object) -> str:
+        return ""
+
+
 def make_medium(root: Path, *, nested_files: int = 1500) -> None:
+
     """A medium with enough files to show progress, and a few nasty ones."""
     (root / "Documents").mkdir(parents=True, exist_ok=True)
     (root / "Pictures").mkdir(parents=True, exist_ok=True)
@@ -219,8 +239,32 @@ class Shot:
         self.tab(window, 2)
         self.shot(window, "result-infected.png")
 
+        # the settings page, with the USB detection mode that is being shown off
+        config.watch.mode = "notify"
+        backend.settingsChanged.emit()
         self.tab(window, 3)
+        self.pump(app, 0.3)
         self.shot(window, "settings-view.png")
+
+        # a medium that appeared while the watcher runs (watch.mode notify):
+        # the banner is what the notification leads to
+        backend_module.DesktopNotifier = SilentNotifier
+        backend._on_device_inserted(
+            {
+                "node": "/dev/sdb1",
+                "disk": "/dev/sdb",
+                "displayName": "SANDISK16",
+                "sizeText": "14.9 GiB",
+                "mountPath": DEMO_DEVICES[0].mount_path,
+                "summary": f"SANDISK16 ({DEMO_DEVICES[0].size_text}, {DEMO_DEVICES[0].mount_path})",
+            }
+        )
+        self.tab(window, 0)
+        self.pump(app, 0.4)
+        self.shot(window, "new-medium.png")
+        backend.dismissPendingDevice()
+        self.tab(window, 3)
+        self.pump(app, 0.2)
 
         # the ClamAV installation dialog
         dialog = window.findChild(QObject, "clamavInstallDialog")

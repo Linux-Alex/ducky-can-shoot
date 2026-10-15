@@ -369,6 +369,9 @@ def isolated_environment(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(home / "data"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(home / "cache"))
+    # the runtime directory holds the "which DCS is running" marker; keeping it
+    # in the temporary tree stops a test from seeing the developer's session
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(home / "run"))
     monkeypatch.setenv("NO_COLOR", "1")
     yield
 

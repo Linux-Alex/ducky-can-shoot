@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-557%20passing-brightgreen" alt="557 tests passing">
+  <img src="https://img.shields.io/badge/tests-644%20passing-brightgreen" alt="644 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.1.0%20alpha-orange" alt="Status: 0.1.0 alpha">
@@ -201,7 +201,48 @@ Exit codes make the result scriptable: **0** clean, **1** suspicious or infected
 | **Email** | HTML and text body, verdict, numbers, findings, the link when safe, report attached, Bcc supported, and a dry run that writes the message to disk instead of sending it |
 | **Live interface** | seven stages with their own progress, files/bytes counters, throughput chart, current file, findings as they appear, log pane |
 | **Honest about coverage** | files skipped for size, unreadable paths, a missing ClamAV and a stale signature database are reported in the interface, the report and the email |
+| **USB detection** | Off by default. Turn it on and DCS can notify you when a stick is plugged in (with a button that opens it), open itself on the new medium, or run the whole job automatically - see [USB detection](#usb-detection-when-you-plug-something-in) |
 | **Nothing executable is run** | the medium is read, never written, and nothing found on it is ever executed |
+
+## USB detection (when you plug something in)
+
+Ducky Can Shoot is a tool you start, not a service that watches you. It can
+nevertheless react on its own, and you choose how far that goes: the setting is
+**off by default** and lives in **Settings → USB detection**, or in
+`[watch] mode` in the configuration file.
+
+| Mode | What happens when a medium appears |
+| --- | --- |
+| **Do nothing** (default) | Nothing watches, nothing opens. DCS stays a tool you start. |
+| **Notify me** | A desktop notification with an **Open Ducky Can Shoot** button. Nothing is read from the medium until you press it. |
+| **Open with it selected** | DCS opens with the new medium already selected; the scan still waits for you. |
+| **Open and run** | DCS opens and runs the whole job: scan, archive, upload, and the email when a recipient is configured. Without a recipient it stops after the report and shows the link. |
+
+![A medium that was plugged in while the watcher runs: the banner on the New job page offers to scan it](docs/images/new-medium.png)
+
+While a window is open it does the watching itself; to react while DCS is closed,
+tick **Start the watcher with my session**, which writes one autostart entry
+(`~/.config/autostart/org.kde.dcs.watch.desktop`). The installer offers the same
+choice at the end, and "do nothing" is the default answer:
+
+```bash
+./scripts/install.sh                 # asks, default: do nothing
+./scripts/install.sh --watch=notify  # off | notify | open | open_run
+```
+
+From a terminal:
+
+```bash
+dcs watch --status                   # what is configured, and is a window open?
+dcs watch                            # listen with the configured mode
+dcs config set watch.mode open_run   # not for you? "off" is one command away
+```
+
+The watcher polls `lsblk` every three seconds. It never mounts, never reads a
+file, never scans and never needs root: it looks at the list of block devices and
+then hands the medium to the interface, which is where every decision still
+happens. A stick with two partitions counts as one medium, and a running window
+plus the background watcher never both react.
 
 ## Upload hosts
 
@@ -256,6 +297,8 @@ dcs run --device /dev/sdb1 --to me@example.org          # the whole job
 dcs run --path ./incoming --no-upload --dry-run-email   # nothing leaves the machine
 dcs install-clamav --dry-run # how ClamAV would be installed here
 dcs config show              # the effective configuration
+dcs config set watch.mode notify   # react when a stick is plugged in (off by default)
+dcs watch --status           # what the watcher would do right now
 ```
 
 Every subcommand, flag and exit code: **[docs/CLI.md](docs/CLI.md)**.

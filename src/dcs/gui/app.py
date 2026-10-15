@@ -11,6 +11,7 @@ from PyQt6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtQml import QQmlApplicationEngine, QQmlContext
 
+from dcs.core import autostart, session
 from dcs.core.config import AppConfig, load_config
 from dcs.core.log import configure_logging, get_logger
 from dcs.gui.backend import Backend
@@ -122,8 +123,19 @@ def installed_desktop_file(app_id: str) -> str:
     return ""
 
 
-def run_gui(argv: list[str] | None = None, *, config: AppConfig | None = None) -> int:
-    """Entry point used by the dcs-gui script and by 'dcs' without arguments."""
+def run_gui(
+    argv: list[str] | None = None,
+    *,
+    config: AppConfig | None = None,
+    device: str = "",
+    autorun: bool = False,
+) -> int:
+    """Entry point used by the dcs-gui script and by 'dcs' without arguments.
+
+    *device* is the medium to open on (a node such as /dev/sdb1, mounted when
+    needed) and *autorun* starts the job on it straight away; both are how the
+    USB watcher hands a freshly plugged medium to a new window.
+    """
     argv = list(argv or sys.argv)
     configure_logging(level=os.environ.get("DCS_LOG_LEVEL", "INFO"))
 
@@ -168,6 +180,19 @@ def run_gui(argv: list[str] | None = None, *, config: AppConfig | None = None) -
     # while the engine is still tearing down, and every binding would then
     # report "cannot read property of null" on exit.
     _SESSION.update({"engine": engine, "backend": backend})
+
+    # Tell the watcher (the autostart process) that the window is here: while
+    # this marker is alive 'dcs watch' stays quiet instead of reacting twice.
+    session.claim()
+    app.aboutToQuit.connect(session.release)
+
+    # The autostart entry is a setting like any other: put it back when the
+    # configuration asks for it but the file went missing.
+    if backend.config.watch.autostart and backend.config.watch.mode != "off":
+        autostart.sync(True)
+
+    if device:
+        QTimer.singleShot(0, lambda: backend.openDevice(device, autorun=autorun))
 
     # push log records that happened before the UI existed
     ring = configure_logging(level=os.environ.get("DCS_LOG_LEVEL", "INFO"))

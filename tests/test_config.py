@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from dcs.core.config import (
+    WATCH_MODES,
     AppConfig,
     default_config_path,
     default_data_dir,
@@ -25,6 +26,8 @@ from dcs.core.config import (
     default_work_dir,
     dumps_toml,
     load_config,
+    option_paths,
+    set_option,
 )
 
 
@@ -72,6 +75,8 @@ def test_defaults() -> None:
     assert config.report.directory == ""
     assert config.gui.window_width == 1180
     assert config.gui.remember_window_size is True
+    assert config.watch.mode == "off"
+    assert config.watch.interval_s == 3.0
     assert config.general.output_dir == ""
     assert config.source_path == ""
 
@@ -88,6 +93,7 @@ def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
         "email",
         "report",
         "gui",
+        "watch",
     }
     assert set(data["general"]) == {
         "confirm_before_upload",
@@ -102,6 +108,13 @@ def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
         "switch_to_result",
         "window_height",
         "window_width",
+    }
+    assert set(data["watch"]) == {
+        "autostart",
+        "ignore_existing",
+        "interval_s",
+        "mode",
+        "notify_timeout_ms",
     }
     # general.language and gui.confirm_upload were removed on purpose
     assert "language" not in data["general"]
@@ -821,3 +834,124 @@ def test_merge_rejects_a_non_numeric_int_value() -> None:
     config.merge({"email": {"smtp_port": "2525x"}})
 
     assert config.email.smtp_port == 587
+
+
+# ---------------------------------------------------------------------------
+# [watch]: what happens when a medium is plugged in
+# ---------------------------------------------------------------------------
+
+
+def test_the_watcher_is_off_until_it_is_asked_for() -> None:
+    watch = AppConfig().watch
+
+    assert watch.mode == "off"
+    assert watch.interval_s >= 0.5
+    assert watch.ignore_existing is True, "a stick from yesterday is not news"
+    assert watch.autostart is False
+    assert watch.notify_timeout_ms > 0
+
+
+def test_the_watch_section_survives_a_round_trip() -> None:
+    config = AppConfig()
+    config.watch.mode = "open_run"
+    config.watch.interval_s = 7.5
+    config.watch.ignore_existing = False
+    config.watch.autostart = True
+
+    parsed = tomllib.loads(dumps_toml(config.to_dict()))
+    back = AppConfig.from_dict(parsed)
+
+    assert parsed["watch"]["mode"] == "open_run"
+    assert back.watch == config.watch
+
+
+def test_an_unknown_watch_mode_is_reported() -> None:
+    config = AppConfig()
+    config.watch.mode = "sometimes"
+
+    problems = config.validation_problems()
+
+    assert any("watch.mode" in problem and "open_run" in problem for problem in problems)
+
+
+def test_a_watch_interval_that_is_too_small_is_reported() -> None:
+    config = AppConfig()
+    config.watch.interval_s = 0.1
+
+    assert any("watch.interval_s" in problem for problem in config.validation_problems())
+
+
+@pytest.mark.parametrize("mode", WATCH_MODES)
+def test_every_watch_mode_is_accepted(mode: str) -> None:
+    config = AppConfig()
+    config.watch.mode = mode
+
+    assert not [p for p in config.validation_problems() if "watch.mode" in p]
+
+
+def test_the_watch_section_can_be_layered_like_any_other() -> None:
+    config = AppConfig()
+
+    config.merge({"watch": {"mode": "notify", "interval_s": "5"}})
+
+    assert config.watch.mode == "notify"
+    assert config.watch.interval_s == 5.0
+
+
+# ---------------------------------------------------------------------------
+# dotted option names (dcs config set)
+# ---------------------------------------------------------------------------
+
+
+def test_every_section_is_listed_as_options() -> None:
+    names = option_paths()
+
+    assert "watch.mode" in names
+    assert "email.smtp_host" in names
+    assert "archive.format" in names
+    # nested tables are set as a whole section, not as single values
+    assert not [name for name in names if name.count(".") != 1]
+    assert len(names) == len(set(names))
+
+
+def test_set_option_coerces_the_value() -> None:
+    config = AppConfig()
+
+    assert set_option(config, "watch.mode", "open_run")[0] is True
+    assert set_option(config, "watch.interval_s", "9")[0] is True
+    assert set_option(config, "watch.ignore_existing", "false")[0] is True
+    assert set_option(config, "email.to_addrs", "a@x.test, b@x.test")[0] is True
+
+    assert config.watch.mode == "open_run"
+    assert config.watch.interval_s == 9.0
+    assert config.watch.ignore_existing is False
+    assert config.email.to_addrs == ["a@x.test", "b@x.test"]
+
+
+def test_set_option_refuses_a_value_the_config_calls_broken() -> None:
+    config = AppConfig()
+
+    ok, message = set_option(config, "watch.mode", "maybe")
+
+    assert ok is False
+    assert "watch.mode" in message
+    assert config.watch.mode == "off", "the old value is kept"
+
+
+def test_set_option_refuses_an_unknown_option_or_section() -> None:
+    config = AppConfig()
+
+    assert set_option(config, "watch", "notify")[0] is False
+    assert set_option(config, "nope.mode", "notify")[0] is False
+    assert set_option(config, "watch.nope", "1")[0] is False
+    assert set_option(config, "scan.max_file_size_mb", "not a number")[0] is False
+
+
+def test_set_option_keeps_a_nested_table_out_of_reach() -> None:
+    config = AppConfig()
+
+    ok, message = set_option(config, "scan.clamav.batch_size", "10")
+
+    assert ok is False
+    assert "scan.clamav.batch_size" in message
+

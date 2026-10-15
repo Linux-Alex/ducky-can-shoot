@@ -40,6 +40,29 @@ Kirigami.ApplicationWindow {
         toastPopup.show(message, level);
     }
 
+    // A job that starts without the user pressing anything (watch.mode
+    // "open_run", or the banner on the New job page) still has to show its
+    // progress, so the window follows the state instead of the button.
+    Connections {
+        target: backend
+
+        function onStateChanged() {
+            if (backend.state === "running" && root.tabIndex !== 1) {
+                root.showTab(1);
+            }
+        }
+
+        // A medium plugged in and an automatic mode: bring the window forward
+        // and show the page the new medium was selected on.
+        function onDeviceInserted(device) {
+            if (backend.watchMode === "notify") {
+                return;
+            }
+            root.showTab(0);
+            root.requestActivate();
+        }
+    }
+
     // No global drawer on purpose: the tab bar below already carries every
     // destination, and a Kirigami drawer adds a hamburger row (and its own
     // DrawerHandle binding loop) that this window does not need.

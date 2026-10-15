@@ -186,6 +186,45 @@ There is no theme key: the interface deliberately follows the Plasma colour
 scheme and icon theme, because Kirigami 6 exposes colour sets rather than a
 light/dark override.
 
+### `[watch]`
+
+What happens when a medium is plugged in while Ducky Can Shoot is running, or
+while you are logged in. Everything here is **off by default**: nothing is
+watched until `mode` says otherwise.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `mode` | str | `"off"` | `off`, `notify`, `open` or `open_run` (see below). |
+| `interval_s` | float | `3.0` | Seconds between two `lsblk` polls. Values below 0.5 are refused: the watcher reads the block device list, nothing more. |
+| `ignore_existing` | bool | `true` | Ignore media that were already attached when the watcher started, so a stick plugged in yesterday does not trigger anything at login. |
+| `notify_timeout_ms` | int | `20000` | How long the notification (and its **Open Ducky Can Shoot** button) stays on screen. |
+| `autostart` | bool | `false` | Also write `~/.config/autostart/org.kde.dcs.watch.desktop`, so `dcs watch` starts with the desktop session. The settings page keeps this key and the file in sync. |
+
+The four modes, weakest first:
+
+| Mode | What happens when a medium appears |
+| --- | --- |
+| `off` | Nothing at all. No process watches, no notification, no window. |
+| `notify` | A desktop notification with an **Open Ducky Can Shoot** button. Nothing is read from the medium until you press it (or press **Scan it now** on the banner in the window). |
+| `open` | Ducky Can Shoot starts with the new medium already selected. The scan still waits for you. |
+| `open_run` | Ducky Can Shoot starts and runs the whole job: scan, archive, upload, and email when `email.to_addrs` is not empty. Without a recipient it stops after the report and the link is shown on the result page. |
+
+Two more rules matter in practice:
+
+* **One event per physical disk.** A stick with two partitions is one thing you
+  plugged in, so it produces one notification and at most one job; the partition
+  with a mounted filesystem is the one that is used.
+* **Exactly one reaction.** While a window is open it does the watching itself
+  and the background watcher stays quiet (it checks the marker `dcs` writes into
+  `$XDG_RUNTIME_DIR` when the interface starts). Close the window and the
+  background watcher takes over again.
+
+```bash
+dcs config set watch.mode notify        # then plug a stick in
+dcs config set watch.autostart true     # survive a logout
+dcs watch --status                      # what is configured right now
+```
+
 ## The complete default file
 
 This is exactly what DCS writes the first time it saves a configuration, and it
@@ -299,6 +338,13 @@ window_height = 780
 show_log_pane = true
 auto_select_new_device = true
 switch_to_result = true
+
+[watch]
+mode = "off"
+interval_s = 3.0
+ignore_existing = true
+notify_timeout_ms = 20000
+autostart = false
 ```
 
 A practical starting point for a workstation that should upload the image and mail

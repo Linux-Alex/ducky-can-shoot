@@ -493,3 +493,298 @@ def test_unknown_subcommand_is_rejected(
     captured = capsys.readouterr()
     assert "invalid choice" in captured.err
     assert "frobnicate" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# dcs config set
+# ---------------------------------------------------------------------------
+
+
+def test_config_set_writes_the_value_and_says_where(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(["--config", str(config_file), "config", "set", "watch.mode", "notify"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "watch.mode = 'notify'" in captured.out
+    assert str(config_file) in captured.out
+    assert tomllib.loads(config_file.read_text(encoding="utf-8"))["watch"]["mode"] == "notify"
+
+
+def test_config_set_lists_and_coerces_its_values(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main(["--config", str(config_file), "config", "set", "email.to_addrs", "a@x.test, b@x.test"])
+    main(["--config", str(config_file), "config", "set", "watch.interval_s", "5"])
+    capsys.readouterr()
+
+    data = tomllib.loads(config_file.read_text(encoding="utf-8"))
+    assert data["email"]["to_addrs"] == ["a@x.test", "b@x.test"]
+    assert data["watch"]["interval_s"] == 5
+
+
+def test_config_set_refuses_a_value_the_config_calls_broken(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = config_file.read_text(encoding="utf-8")
+    code = main(["--config", str(config_file), "config", "set", "watch.mode", "sometimes"])
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert "watch.mode" in captured.err
+    assert config_file.read_text(encoding="utf-8") == before
+
+
+def test_config_set_needs_both_halves(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(["--config", str(config_file), "config", "set", "watch.mode"])
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert "usage" in captured.err
+
+
+def test_config_options_lists_the_watch_section(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(["--config", str(config_file), "config", "--options"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "watch.mode" in captured.out
+    assert "watch.autostart" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# dcs watch
+# ---------------------------------------------------------------------------
+
+
+def watch_event(label: str = "HOLIDAY") -> Any:
+    """A medium the fake watcher reports as freshly plugged in."""
+    from dcs.core.watch import DeviceEvent
+
+    device = BlockDevice(
+        name="sdb1",
+        path="/dev/sdb1",
+        type="part",
+        size=7_600_000_000,
+        fstype="vfat",
+        label=label,
+        transport="usb",
+        removable=True,
+        mountpoints=["/media/aleks/HOLIDAY"],
+    )
+    return DeviceEvent(disk="/dev/sdb", device=device, partitions=(device,), inserted_at=1.0)
+
+
+class FakeWatchLoop:
+    """Stands in for DeviceWatcher: reports one medium, then returns."""
+
+    def __init__(self, config: Any = None, **kwargs: Any) -> None:
+        self.mode = kwargs.get("mode") or (config.watch.mode if config else "off")
+        self.interval_s = float(kwargs.get("interval_s") or (config.watch.interval_s if config else 3))
+        self.ignore_existing = True
+        self.events = [watch_event()]
+        FakeWatchLoop.last = self
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode != "off"
+
+    def prime(self) -> None:  # pragma: no cover - the loop is faked
+        pass
+
+    def poll(self) -> list[Any]:
+        return list(self.events)
+
+    def run(self, on_event: Any, *, stop: Any = None, on_error: Any = None, **_: Any) -> int:
+        for event in self.events:
+            on_event(event)
+        return len(self.events)
+
+
+class FakeDesktopNotifier:
+    """Records the notifications and answers with the action to fake."""
+
+    answer = ""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.timeout_ms = kwargs.get("timeout_ms", 20000)
+        FakeDesktopNotifier.last = self
+
+    def available(self) -> bool:
+        return True
+
+    def notify(self, title: str, body: str = "", **kwargs: Any) -> str:
+        FakeDesktopNotifier.calls.append((title, body))
+        return FakeDesktopNotifier.answer
+
+
+FakeDesktopNotifier.calls = []
+
+
+@pytest.fixture
+def watch_harness(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Patch the pieces dcs watch reaches out to and record what it does."""
+    launched: list[tuple[str, bool]] = []
+    state = {"gui_running": False}
+
+    monkeypatch.setattr("dcs.core.watch.DeviceWatcher", FakeWatchLoop)
+    monkeypatch.setattr("dcs.core.notify.desktop.DesktopNotifier", FakeDesktopNotifier)
+    monkeypatch.setattr("dcs.core.session.gui_running", lambda: state["gui_running"])
+    monkeypatch.setattr(
+        dcs.cli, "launch_gui", lambda node, autorun=False: launched.append((node, autorun)) or True
+    )
+    FakeDesktopNotifier.calls = []
+    FakeDesktopNotifier.answer = ""
+    return {"launched": launched, "state": state}
+
+
+def test_watch_says_so_when_it_is_off(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(["--config", str(config_file), "watch"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "off" in captured.out
+    assert "dcs config set watch.mode notify" in captured.out
+
+
+def test_watch_status_shows_the_mode_and_the_autostart_file(
+    config_file: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    main(["--config", str(config_file), "config", "set", "watch.mode", "open"])
+    capsys.readouterr()
+    code = main(["--config", str(config_file), "watch", "--status"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "mode            : open" in captured.out
+    assert "autostart" in captured.out
+    assert "interface       : not running" in captured.out
+
+
+def test_watch_once_lists_what_is_attached(
+    config_file: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device = watch_event().device
+    monkeypatch.setattr("dcs.core.watch.default_discover", lambda: ([device], ["/dev/sdb"]))
+
+    code = main(["--config", str(config_file), "watch", "--once"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "/dev/sdb1" in captured.out
+    assert "HOLIDAY" in captured.out
+
+
+def test_watch_once_can_speak_json(
+    config_file: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device = watch_event().device
+    monkeypatch.setattr("dcs.core.watch.default_discover", lambda: ([device], ["/dev/sdb"]))
+
+    assert main(["--config", str(config_file), "watch", "--once", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload[0]["node"] == "/dev/sdb1"
+    assert payload[0]["displayName"] == "HOLIDAY"
+
+
+def test_watch_notify_offers_to_open_the_interface(
+    config_file: Path, capsys: pytest.CaptureFixture[str], watch_harness: Any
+) -> None:
+    main(["--config", str(config_file), "config", "set", "watch.mode", "notify"])
+    capsys.readouterr()
+    FakeDesktopNotifier.answer = "open"
+
+    code = main(["--config", str(config_file), "watch"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "new medium: HOLIDAY" in captured.out
+    assert FakeDesktopNotifier.calls, "a notification was shown"
+    assert "HOLIDAY" in FakeDesktopNotifier.calls[0][0]
+    assert watch_harness["launched"] == [("/dev/sdb1", False)]
+
+
+def test_watch_notify_does_not_open_anything_when_it_is_dismissed(
+    config_file: Path, capsys: pytest.CaptureFixture[str], watch_harness: Any
+) -> None:
+    main(["--config", str(config_file), "config", "set", "watch.mode", "notify"])
+    capsys.readouterr()
+    FakeDesktopNotifier.answer = ""
+
+    assert main(["--config", str(config_file), "watch"]) == 0
+    assert watch_harness["launched"] == []
+
+
+def test_watch_stays_quiet_while_the_interface_is_open(
+    config_file: Path, capsys: pytest.CaptureFixture[str], watch_harness: Any
+) -> None:
+    main(["--config", str(config_file), "config", "set", "watch.mode", "open"])
+    capsys.readouterr()
+    watch_harness["state"]["gui_running"] = True
+
+    assert main(["--config", str(config_file), "watch"]) == 0
+    assert watch_harness["launched"] == []
+    assert FakeDesktopNotifier.calls == []
+
+
+def test_watch_open_launches_the_interface_on_the_medium(
+    config_file: Path, capsys: pytest.CaptureFixture[str], watch_harness: Any
+) -> None:
+    main(["--config", str(config_file), "config", "set", "watch.mode", "open"])
+    capsys.readouterr()
+
+    assert main(["--config", str(config_file), "watch"]) == 0
+    assert watch_harness["launched"] == [("/dev/sdb1", False)]
+    assert FakeDesktopNotifier.calls == [], "only the notify mode notifies"
+
+
+def test_watch_open_run_starts_the_job_as_well(
+    config_file: Path, capsys: pytest.CaptureFixture[str], watch_harness: Any
+) -> None:
+    main(["--config", str(config_file), "config", "set", "watch.mode", "open_run"])
+    capsys.readouterr()
+
+    assert main(["--config", str(config_file), "watch"]) == 0
+    assert watch_harness["launched"] == [("/dev/sdb1", True)]
+
+
+def test_watch_rejects_a_mode_it_does_not_know(
+    config_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # the command line is checked by argparse; a hand edited file is not
+    config_file.write_text(
+        config_file.read_text(encoding="utf-8") + '\n[watch]\nmode = "sometimes"\n',
+        encoding="utf-8",
+    )
+    code = main(["--config", str(config_file), "watch"])
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert "unknown watch mode" in captured.err
+
+
+def test_watch_help_explains_every_mode(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["watch", "--help"])
+    captured = capsys.readouterr()
+
+    for mode in ("off", "notify", "open", "open_run"):
+        assert mode in captured.out
+
+
+def test_the_gui_command_carries_the_medium_and_the_autorun_flag() -> None:
+    assert dcs.cli.gui_command("/dev/sdb1")[-2:] == ["--device", "/dev/sdb1"]
+    assert dcs.cli.gui_command("/dev/sdb1", autorun=True)[-3:] == [
+        "--device",
+        "/dev/sdb1",
+        "--autorun",
+    ]
+

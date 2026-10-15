@@ -12,17 +12,23 @@ to be usable from a script, so the exit code carries the verdict:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import threading
 import time
 from typing import Any
 
 from dcs.core.config import (
+    WATCH_MODES,
     default_config_path,
     load_config,
+    option_paths,
+    set_option,
     write_default_config,
 )
 from dcs.core.device import list_removable_devices
@@ -275,7 +281,173 @@ def cmd_gui(args: argparse.Namespace) -> int:
         print("Install it (for example: sudo apt install python3-pyqt6 python3-pyqt6.qtqml) "
               "or use the headless commands such as 'dcs scan'.", file=sys.stderr)
         return EXIT_ERROR
-    return run_gui(["dcs"], config=load_config(args.config))
+    return run_gui(
+        ["dcs"],
+        config=load_config(args.config),
+        device=getattr(args, "device", "") or "",
+        autorun=bool(getattr(args, "autorun", False)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# watching for newly plugged media
+# ---------------------------------------------------------------------------
+
+
+def gui_command(device: str, *, autorun: bool = False) -> list[str]:
+    """How to start the interface on *device*, installed or from a checkout."""
+    launcher = shutil.which("dcs")
+    argv = [launcher] if launcher else [sys.executable, "-m", "dcs"]
+    argv += ["gui", "--device", device]
+    if autorun:
+        argv.append("--autorun")
+    return argv
+
+
+def launch_gui(device: str, *, autorun: bool = False) -> bool:
+    """Start the interface on a medium, detached from this process."""
+    argv = gui_command(device, autorun=autorun)
+    try:
+        subprocess.Popen(
+            argv,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        print(f"could not start the interface: {exc}", file=sys.stderr)
+        return False
+    print(f"starting {APP_NAME} on {device}" + (" and running the job" if autorun else ""))
+    return True
+
+
+#: one line per mode, used by 'dcs watch --status' and by the help text
+MODE_SUMMARY: dict[str, str] = {
+    "off": "nothing; the watcher exits immediately",
+    "notify": "desktop notification with an Open button, nothing is scanned",
+    "open": "start the interface on the new medium",
+    "open_run": "start the interface and run the whole job",
+}
+
+
+def _watch_status(config: Any, mode: str) -> int:
+    from dcs.core import autostart, session
+
+    running = session.gui_pid()
+    print(f"mode            : {mode}")
+    print(f"watch interval  : {config.watch.interval_s:g}s")
+    print(f"ignore existing : {config.watch.ignore_existing}")
+    print(f"autostart file  : {autostart.autostart_path()}"
+          f" ({'installed' if autostart.is_enabled() else 'not installed'})")
+    print(f"autostart runs  : {autostart.default_exec()} watch")
+    state = f"running (pid {running})" if running else "not running"
+    print(f"interface       : {state}")
+    print(f"would do        : {MODE_SUMMARY.get(mode, mode)}")
+    return EXIT_CLEAN
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Listen for media that are plugged in and react the way the config says."""
+    from dcs.core.notify.desktop import ACTION_OPEN, DesktopNotifier
+    from dcs.core.session import gui_running
+    from dcs.core.watch import DeviceWatcher
+
+    config = load_config(args.config)
+    mode = (getattr(args, "mode", "") or config.watch.mode or "off").strip().lower()
+    if mode not in WATCH_MODES:
+        print(
+            f"unknown watch mode {mode!r}: use one of {', '.join(WATCH_MODES)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    if getattr(args, "status", False):
+        return _watch_status(config, mode)
+
+    watcher = DeviceWatcher(config, mode=mode, interval_s=getattr(args, "interval", None))
+
+    if getattr(args, "once", False):
+        # a snapshot: everything attached right now, as if it had just appeared
+        watcher.ignore_existing = False
+        events = watcher.poll()
+        if args.json:
+            print(json.dumps([event.to_dict() for event in events], indent=2, ensure_ascii=False))
+            return EXIT_CLEAN
+        if not events:
+            print("No removable medium is attached.")
+            return EXIT_CLEAN
+        print(f"{'NODE':<14}{'LABEL':<20}{'SIZE':>10}  {'FS':<8}MOUNT")
+        for event in events:
+            print(
+                f"{event.node:<14}{(event.label or '-')[:19]:<20}"
+                f"{event.device.size_text:>10}  {event.device.fstype:<8}"
+                f"{event.mount_path or '(not mounted)'}"
+            )
+        return EXIT_CLEAN
+
+    if mode == "off":
+        print("The USB watcher is off, so nothing was started.")
+        print("Turn it on with:  dcs config set watch.mode notify")
+        print(f"Modes: {', '.join(WATCH_MODES)}  (see 'dcs watch --help' for what each one does)")
+        return EXIT_CLEAN
+
+    notifier = DesktopNotifier(timeout_ms=config.watch.notify_timeout_ms)
+    if mode == "notify" and not notifier.available():
+        print(
+            "note: notify-send is not installed, so no notification can be shown "
+            "(install libnotify-bin); new media are printed here instead.",
+            file=sys.stderr,
+        )
+
+    stop = threading.Event()
+
+    def on_signal(signum: int, frame: Any) -> None:  # pragma: no cover - signal handler
+        print("stopping...", file=sys.stderr)
+        stop.set()
+
+    for name in ("SIGINT", "SIGTERM"):
+        number = getattr(signal, name, None)
+        if number is not None:
+            # not the main thread (an embedding application or a test): there is
+            # nothing to install a handler on, and stop still ends the loop
+            with contextlib.suppress(OSError, ValueError):
+                signal.signal(number, on_signal)
+
+    def react(event: Any) -> None:
+        """What the configured mode does with one new medium."""
+        if gui_running():
+            # the interface is open and watches for itself: two reactions would
+            # mean two notifications and possibly two jobs
+            log.debug("ignoring %s: the interface is running", event.node)
+            return
+        if args.json:
+            print(json.dumps(event.to_dict(), ensure_ascii=False), flush=True)
+        else:
+            print(f"new medium: {event.summary()}", flush=True)
+        if mode == "notify":
+            choice = notifier.notify(
+                f"USB medium plugged in: {event.label}",
+                f"{event.summary()}. Open {APP_NAME} to scan it, archive it and email "
+                "the verdict; nothing has been read from the medium yet.",
+                actions=((ACTION_OPEN, f"Open {APP_NAME}"),),
+            )
+            if choice == ACTION_OPEN:
+                launch_gui(event.node)
+        elif mode == "open":
+            launch_gui(event.node)
+        elif mode == "open_run":
+            launch_gui(event.node, autorun=True)
+
+    print(
+        f"Watching for new media (mode: {mode}, every {watcher.interval_s:g}s). "
+        "Media that are already attached are ignored. Ctrl+C stops.",
+        flush=True,
+    )
+    with contextlib.suppress(KeyboardInterrupt):  # pragma: no cover - interactive only
+        watcher.run(react, stop=stop)
+    print("Stopped watching.", flush=True)
+    return EXIT_CLEAN
 
 
 def cmd_devices(args: argparse.Namespace) -> int:
@@ -470,6 +642,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    if getattr(args, "options", False):
+        print("\n".join(option_paths(config)))
+        return EXIT_CLEAN
+    if args.action == "set":
+        if not args.key or args.value is None:
+            print("usage: dcs config set KEY VALUE   (see 'dcs config --options')", file=sys.stderr)
+            return EXIT_ERROR
+        ok, message = set_option(config, args.key, args.value)
+        if not ok:
+            print(f"error: {message}", file=sys.stderr)
+            return EXIT_ERROR
+        path = config.save()
+        print(f"{message}  (saved to {path})")
+        return EXIT_CLEAN
     if args.action == "path":
         print(config.source_path or str(default_config_path()))
         return EXIT_CLEAN
@@ -482,7 +668,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
         print(dumps_toml(config.to_dict(mask_secrets=not args.show_secrets)))
         return EXIT_CLEAN
-    print("usage: dcs config {init|show|path}", file=sys.stderr)
+    print("usage: dcs config {init|show|path|set}", file=sys.stderr)
     return EXIT_ERROR
 
 
@@ -607,7 +793,37 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     gui = subparsers.add_parser("gui", help="start the graphical interface (default)")
+    gui.add_argument("--device", help="open the interface on this medium (mounted if needed)")
+    gui.add_argument(
+        "--autorun",
+        action="store_true",
+        help="start the job on that medium as soon as the window is up",
+    )
     gui.set_defaults(func=cmd_gui)
+
+    watch = subparsers.add_parser(
+        "watch",
+        help="watch for media plugged in while this runs and react (see watch.mode)",
+        description="Listen for newly plugged media and do what watch.mode says: "
+        + "; ".join(f"{name} - {MODE_SUMMARY[name]}" for name in WATCH_MODES)
+        + ". Media that are already attached when the watcher starts are ignored.",
+    )
+    watch.add_argument("--mode", choices=list(WATCH_MODES), help="override watch.mode for this run")
+    watch.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="seconds between two polls (default: watch.interval_s)",
+    )
+    watch.add_argument("--once", action="store_true", help="report the media attached now and exit")
+    watch.add_argument(
+        "--status",
+        action="store_true",
+        help="show the mode, the autostart entry and the state of the interface",
+    )
+    watch.add_argument("--json", action="store_true", help="one JSON object per medium")
+    watch.set_defaults(func=cmd_watch)
 
     devices = subparsers.add_parser("devices", help="list removable media")
     devices.add_argument("--json", action="store_true")
@@ -643,9 +859,12 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--smtp", action="store_true", help="also connect to the SMTP server")
     doctor.set_defaults(func=cmd_doctor)
 
-    config = subparsers.add_parser("config", help="inspect or create the configuration")
-    config.add_argument("action", choices=["init", "show", "path"], nargs="?", default="show")
+    config = subparsers.add_parser("config", help="inspect, change or create the configuration")
+    config.add_argument("action", choices=["init", "show", "path", "set"], nargs="?", default="show")
+    config.add_argument("key", nargs="?", help="option name for 'set', such as watch.mode")
+    config.add_argument("value", nargs="?", help="value for 'set'")
     config.add_argument("--show-secrets", action="store_true", help="do not mask passwords")
+    config.add_argument("--options", action="store_true", help="print every settable option name")
     config.set_defaults(func=cmd_config)
 
     engines = subparsers.add_parser("engines", help="show the scan engines and their state")

@@ -4,6 +4,16 @@
 #   ./scripts/install.sh              install into ~/.local
 #   PREFIX=/opt/dcs ./scripts/install.sh   install somewhere else
 #
+# The optional USB watcher - the thing that opens or notifies you when a stick
+# is plugged in - is off unless you ask for it:
+#
+#   ./scripts/install.sh --watch=notify     off | notify | open | open_run
+#   ./scripts/install.sh --no-watch         same as --watch=off
+#   WATCH_MODE=open_run ./scripts/install.sh
+#
+# Without an option on the command line the script asks, and "do nothing" is
+# the default answer.
+#
 # The script creates a virtual environment that can see the distribution
 # packages, so a system PyQt6 (python3-pyqt6, python3-pyqt6.qtqml) is reused
 # instead of being downloaded again.
@@ -14,6 +24,26 @@ VENV="${VENV:-$HOME/.local/share/dcs/venv}"
 BINDIR="$PREFIX/bin"
 APPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 ICONDIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+
+#: off (the default) | notify | open | open_run
+WATCH_MODE="${WATCH_MODE:-}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --watch=*) WATCH_MODE="${1#*=}" ;;
+        --watch) WATCH_MODE="${2:-}"; shift ;;
+        --no-watch) WATCH_MODE="off" ;;
+        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) printf 'unknown option: %s\n' "$1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+case "$WATCH_MODE" in
+    ""|off|notify|open|open_run) ;;
+    *) printf 'watch mode must be off, notify, open or open_run (got %s)\n' "$WATCH_MODE" >&2
+       exit 2 ;;
+esac
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$here"
@@ -50,6 +80,56 @@ command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "${XD
 say "writing a default configuration if there is none"
 "$BINDIR/dcs" config init >/dev/null || true
 
+# ---------------------------------------------------------------- USB watcher
+if [ -z "$WATCH_MODE" ] && [ -t 0 ]; then
+    cat <<'MENU'
+
+Watch for newly plugged media?  Nothing is watched unless you choose a mode.
+
+  1) do nothing (default)
+  2) notify me, with a button that opens Ducky Can Shoot on the new medium
+  3) open Ducky Can Shoot with the new medium already selected
+  4) open it and start the job automatically (scan, archive, upload, email)
+
+MENU
+    printf 'Choose 1-4 [1]: '
+    read -r answer || answer=""
+    case "$answer" in
+        2) WATCH_MODE="notify" ;;
+        3) WATCH_MODE="open" ;;
+        4) WATCH_MODE="open_run" ;;
+        *) WATCH_MODE="off" ;;
+    esac
+fi
+WATCH_MODE="${WATCH_MODE:-off}"
+
+WATCH_SUMMARY="off"
+
+if [ "$WATCH_MODE" != "off" ]; then
+    say "enabling the USB watcher (mode: $WATCH_MODE)"
+    "$BINDIR/dcs" config set watch.mode "$WATCH_MODE" >/dev/null
+    "$BINDIR/dcs" config set watch.autostart true >/dev/null
+    # The entry is written by DCS itself, so it is exactly what the settings
+    # page would write and can be turned off again from there.
+    DCS_EXEC="$BINDIR/dcs" "$VENV/bin/python" - <<'PY'
+import os
+
+from dcs.core import autostart
+
+print("autostart entry:", autostart.enable(os.environ["DCS_EXEC"]))
+PY
+    WATCH_SUMMARY="$WATCH_MODE (starts with your session)"
+else
+    say "the USB watcher stays off"
+    "$BINDIR/dcs" config set watch.mode off >/dev/null 2>&1 || true
+    "$BINDIR/dcs" config set watch.autostart false >/dev/null 2>&1 || true
+    DCS_STATE=off "$VENV/bin/python" - <<'PY' 2>/dev/null || true
+from dcs.core import autostart
+
+autostart.disable()
+PY
+fi
+
 cat <<EOF
 
 Installed.
@@ -58,6 +138,9 @@ Installed.
   check the environment  : dcs doctor
   list USB devices       : dcs devices
   scan something         : dcs scan /media/$USER/STICK
+  USB watcher            : $WATCH_SUMMARY
+                           change it any time in Settings, or with:
+                           dcs config set watch.mode notify|open|open_run
 
 Optional but recommended, for signature based scanning:
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import smtplib
 import ssl
+import subprocess
 from email import message_from_binary_file, policy
 from email.message import EmailMessage
 from pathlib import Path
@@ -19,6 +20,8 @@ import pytest
 from dcs.core.archiver import ArchivePart, ArchiveResult
 from dcs.core.config import AppConfig, EmailConfig
 from dcs.core.events import Finding, ScanStats, Severity, Verdict
+from dcs.core.notify import desktop as desktop_notify
+from dcs.core.notify.desktop import DesktopNotifier
 from dcs.core.notify.smtp import Notifier
 from dcs.core.notify.templates import (
     SUBJECT_HEADS,
@@ -774,3 +777,87 @@ def test_test_connection_unreachable(fake_smtp: type[FakeSmtp], email_config: Em
     """A connection error is reported with its type."""
     fake_smtp.connect_error = "connection refused"
     assert Notifier(email_config).test_connection() == (False, "OSError: connection refused")
+
+
+# ---------------------------------------------------------------------------
+# desktop notifications: the "Open Ducky Can Shoot" button without Qt
+# ---------------------------------------------------------------------------
+
+
+class FakeNotifySend:
+    """A stand-in for notify-send that records the command line it was given."""
+
+    def __init__(
+        self, stdout: str = "", returncode: int = 0, stderr: str = "", raises: Any = None
+    ) -> None:
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+        self.raises = raises
+        self.calls: list[list[str]] = []
+        self.timeouts: list[float] = []
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> Any:
+        self.calls.append(list(argv))
+        self.timeouts.append(float(kwargs.get("timeout") or 0))
+        if self.raises is not None:
+            raise self.raises
+        return subprocess.CompletedProcess(argv, self.returncode, self.stdout, self.stderr)
+
+
+def notifier_with(runner: FakeNotifySend, **kwargs: Any) -> DesktopNotifier:
+    instance = DesktopNotifier(runner=runner, **kwargs)
+    instance.binary = "/usr/bin/notify-send"  # skip the which() lookup
+    return instance
+
+
+def test_a_notification_offers_the_open_action_and_reports_it() -> None:
+    runner = FakeNotifySend(stdout="open\n")
+    choice = notifier_with(runner, timeout_ms=15000).notify(
+        "USB medium plugged in: STICK",
+        "STICK (14.9 GiB). Open Ducky Can Shoot to scan it.",
+    )
+
+    assert choice == "open"
+    argv = runner.calls[0]
+    assert argv[0] == "/usr/bin/notify-send"
+    assert "--action" in argv and "open=Open Ducky Can Shoot" in argv
+    assert "--app-name" in argv and APP_NAME in argv
+    assert "--expire-time" in argv and "15000" in argv
+    assert argv[-2:] == [
+        "USB medium plugged in: STICK",
+        "STICK (14.9 GiB). Open Ducky Can Shoot to scan it.",
+    ]
+
+
+def test_the_waiter_gives_up_after_the_notification_lifetime() -> None:
+    runner = FakeNotifySend(stdout="")
+    notifier_with(runner, timeout_ms=2000, extra_wait_s=5).notify("title", "body")
+    assert runner.timeouts[0] == pytest.approx(7.0)
+
+
+def test_a_dismissed_notification_reports_nothing() -> None:
+    assert notifier_with(FakeNotifySend(stdout="")).notify("title", "body") == ""
+
+
+def test_a_refused_notification_is_not_an_error() -> None:
+    runner = FakeNotifySend(returncode=1, stderr="no notification daemon")
+    assert notifier_with(runner).notify("title", "body") == ""
+
+
+def test_a_missing_notification_server_is_survived() -> None:
+    runner = FakeNotifySend(raises=OSError("cannot connect to the session bus"))
+    assert notifier_with(runner).notify("title", "body") == ""
+
+
+def test_a_notification_nobody_answers_is_survived() -> None:
+    runner = FakeNotifySend(raises=subprocess.TimeoutExpired("notify-send", 20))
+    assert notifier_with(runner).notify("title", "body") == ""
+
+
+def test_availability_follows_notify_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop_notify.shutil, "which", lambda name: "/usr/bin/notify-send")
+    assert DesktopNotifier().available() is True
+    monkeypatch.setattr(desktop_notify.shutil, "which", lambda name: None)
+    assert DesktopNotifier().available() is False
+

@@ -722,3 +722,445 @@ def test_status_bar_is_inside_the_page_and_reaches_the_bottom(
     )
 
     gui_app.teardown_engine(engine)
+
+
+# ---------------------------------------------------------------------------
+# the settings page: an always visible save bar, and a USB watcher
+# ---------------------------------------------------------------------------
+
+
+def settings_page_of(window: Any) -> Any:
+    """The SettingsView instance inside a loaded Main.qml."""
+    from PyQt6.QtCore import QObject
+
+    for child in window.findChildren(QObject):
+        if child.metaObject().className().startswith("SettingsView"):
+            return child
+    return None
+
+
+def open_settings(backend: Backend, qapp: Any) -> tuple[Any, Any, Any]:
+    """Load the interface, show it and switch to the settings tab."""
+    engine, _ = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.show()
+    window.setProperty("tabIndex", 3)
+    for _ in range(40):
+        qapp.processEvents()
+        time.sleep(0.01)
+    return engine, window, settings_page_of(window)
+
+
+def test_the_save_button_is_visible_without_scrolling_to_the_bottom(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """Regression test for a save button at the end of a very long page.
+
+    The settings form is much taller than the window, so the button that writes
+    the whole draft to disk used to be visible only after scrolling to the very
+    bottom - and a change could be left unsaved without noticing.
+    """
+    from PyQt6.QtCore import QObject, QPointF
+
+    engine, window, page = open_settings(backend, qapp)
+    assert page is not None, "the settings page was not built"
+
+    bar = window.findChild(QObject, "saveBar")
+    button = window.findChild(QObject, "saveButton")
+    assert bar is not None, "the save bar was not found"
+    assert button is not None, "the save button was not found"
+    assert bar.property("visible") is True
+    assert button.property("visible") is True
+
+    content = window.contentItem()
+    bar_bottom = bar.mapToItem(content, QPointF(0, 0)).y() + bar.height()
+    page_bottom = page.mapToItem(content, QPointF(0, 0)).y() + page.height()
+    assert bar_bottom == pytest.approx(page_bottom, abs=1.5), (
+        f"the save bar ends at {bar_bottom:.1f} instead of the bottom of the settings page "
+        f"({page_bottom:.1f})"
+    )
+    assert bar.width() == pytest.approx(page.width(), abs=1.5)
+    # and the button really is inside that bar
+    button_top = button.mapToItem(content, QPointF(0, 0)).y()
+    assert button_top >= bar.mapToItem(content, QPointF(0, 0)).y() - 1
+    assert button_top + button.height() <= bar_bottom + 1
+
+    gui_app.teardown_engine(engine)
+
+
+def test_the_form_scrolls_but_the_bar_does_not(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """The page really is taller than its viewport, which is the whole point."""
+    from PyQt6.QtCore import QObject
+
+    engine, window, _ = open_settings(backend, qapp)
+    scroll = window.findChild(QObject, "settingsScroll")
+    assert scroll is not None, "the settings form is not in a scroll view"
+    assert scroll.property("contentHeight") > scroll.property("height")
+
+    # scrolling to the bottom must not move the bar
+    bar = window.findChild(QObject, "saveBar")
+    before = bar.property("y")
+    scroll.setProperty("contentY", scroll.property("contentHeight") - scroll.property("height"))
+    for _ in range(5):
+        qapp.processEvents()
+    assert bar.property("y") == pytest.approx(before, abs=0.5)
+
+    gui_app.teardown_engine(engine)
+
+
+def test_the_bar_says_whether_there_is_anything_to_save(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    from PyQt6.QtCore import QMetaObject
+
+    engine, _window, page = open_settings(backend, qapp)
+    assert page is not None
+    assert page.property("unsavedChanges") is False
+
+    # editing one field of the draft makes it dirty
+    page.setProperty("smtpHost", "smtp.changed.test")
+    for _ in range(5):
+        qapp.processEvents()
+    assert page.property("unsavedChanges") is True
+
+    # Revert throws the draft away
+    QMetaObject.invokeMethod(page, "reset")
+    for _ in range(5):
+        qapp.processEvents()
+    assert page.property("unsavedChanges") is False
+    assert page.property("smtpHost") == backend.config.email.smtp_host
+
+    gui_app.teardown_engine(engine)
+
+
+def test_saving_from_the_bar_clears_the_dirty_state(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    from PyQt6.QtCore import QMetaObject
+
+    engine, _window, page = open_settings(backend, qapp)
+    page.setProperty("smtpHost", "smtp.saved.test")
+    for _ in range(5):
+        qapp.processEvents()
+    assert page.property("unsavedChanges") is True
+
+    QMetaObject.invokeMethod(page, "save")
+    for _ in range(10):
+        qapp.processEvents()
+
+    assert backend.config.email.smtp_host == "smtp.saved.test"
+    assert page.property("unsavedChanges") is False
+    assert backend.saveOk is True
+    assert "Saved to" in backend.saveMessage
+    assert Path(backend.config.source_path).is_file()
+
+    gui_app.teardown_engine(engine)
+
+
+def test_test_smtp_uses_the_values_in_the_form(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: "Test SMTP" used to test what was saved last.
+
+    Editing the form and pressing Test reported a failure about values the user
+    could not even see, and saving afterwards made the same values work.
+    """
+    import dcs.core.notify as notify_module
+
+    seen: list[dict[str, Any]] = []
+
+    class FakeNotifier:
+        def __init__(self, email: Any, *, password: str = "", username: str = "") -> None:
+            seen.append(
+                {
+                    "host": email.smtp_host,
+                    "port": email.smtp_port,
+                    "security": email.security,
+                    "username": email.username or username,
+                    "from_addr": email.from_addr,
+                    "to_addrs": list(email.to_addrs),
+                    "password": password,
+                }
+            )
+
+        def test_connection(self) -> tuple[bool, str]:
+            return True, "server said hello"
+
+    monkeypatch.setattr(notify_module, "Notifier", FakeNotifier)
+
+    results: list[tuple[str, bool, str]] = []
+    backend.testResult.connect(lambda what, ok, message: results.append((what, ok, message)))
+    backend.testSmtp(
+        {
+            "smtp_host": "smtp.draft.test",
+            "smtp_port": 2525,
+            "security": "ssl",
+            "username": "draft-user",
+            "from_addr": "draft@test.test",
+            "to_addrs": ["a@test.test", "b@test.test"],
+            "password": "draft-secret",
+        }
+    )
+    for _ in range(200):
+        qapp.processEvents()
+        if results:
+            break
+        time.sleep(0.01)
+
+    assert seen, "the notifier was never asked to test anything"
+    assert seen[0]["host"] == "smtp.draft.test"
+    assert seen[0]["port"] == 2525
+    assert seen[0]["security"] == "ssl"
+    assert seen[0]["from_addr"] == "draft@test.test"
+    assert seen[0]["to_addrs"] == ["a@test.test", "b@test.test"]
+    assert seen[0]["password"] == "draft-secret"
+    assert results == [("smtp", True, "server said hello")]
+
+
+def test_test_smtp_without_a_draft_tests_the_saved_settings(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dcs.core.notify as notify_module
+
+    backend.config.email.smtp_host = "smtp.saved.test"
+    backend.config.email.password = "stored-secret"
+    seen: list[str] = []
+
+    class FakeNotifier:
+        def __init__(self, email: Any, *, password: str = "", username: str = "") -> None:
+            seen.append(f"{email.smtp_host}|{password}")
+
+        def test_connection(self) -> tuple[bool, str]:
+            return True, "ok"
+
+    monkeypatch.setattr(notify_module, "Notifier", FakeNotifier)
+    backend.testSmtp()
+    for _ in range(200):
+        qapp.processEvents()
+        if seen:
+            break
+        time.sleep(0.01)
+
+    assert seen == ["smtp.saved.test|stored-secret"]
+
+
+def test_the_usb_card_offers_the_four_modes(backend: Backend) -> None:
+    modes = backend.watchModes
+    assert [entry["value"] for entry in modes] == ["off", "notify", "open", "open_run"]
+    for entry in modes:
+        assert entry["label"]
+        assert entry["description"]
+    assert backend.watchMode == "off"
+    assert backend.watchActive is False, "nothing runs while the mode is off"
+
+
+def test_saving_the_mode_starts_the_watcher_and_writes_the_autostart_entry(
+    backend: Backend, qapp: Any
+) -> None:
+    from dcs.core import autostart
+
+    assert autostart.is_enabled() is False
+
+    backend.saveSettings({"watch": {"mode": "notify", "autostart": True}})
+    for _ in range(5):
+        qapp.processEvents()
+
+    assert backend.watchMode == "notify"
+    assert backend.watchActive is True
+    assert backend.watchAutostart is True
+    assert autostart.is_enabled() is True
+    assert "watch" in autostart.autostart_path().read_text(encoding="utf-8")
+
+    backend.saveSettings({"watch": {"mode": "off", "autostart": True}})
+    for _ in range(5):
+        qapp.processEvents()
+
+    assert backend.watchActive is False
+    assert autostart.is_enabled() is False, "nothing may watch while the mode is off"
+
+
+def test_a_plugged_medium_is_offered_on_the_new_job_page(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch, qt_messages: list[str]
+) -> None:
+    from PyQt6.QtCore import QObject
+
+    import dcs.gui.backend as backend_module
+
+    notifications: list[str] = []
+
+    class FakeNotifier:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def available(self) -> bool:
+            return True
+
+        def notify(self, title: str, body: str = "", **kwargs: Any) -> str:
+            notifications.append(title)
+            return ""
+
+    monkeypatch.setattr(backend_module, "DesktopNotifier", FakeNotifier)
+    monkeypatch.setattr(backend, "openDevice", lambda node, autorun=False: True)
+
+    backend.config.watch.mode = "notify"
+    payload = {
+        "node": "/dev/sdb1",
+        "displayName": "HOLIDAY",
+        "sizeText": "7.6 GiB",
+        "mountPath": "/media/u/HOLIDAY",
+        "summary": "HOLIDAY (7.6 GiB, /media/u/HOLIDAY)",
+    }
+    alerts: list[dict[str, Any]] = []
+    backend.deviceInserted.connect(alerts.append)
+
+    engine, _backend = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.show()
+    for _ in range(20):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    card = window.findChild(QObject, "newDeviceCard")
+    assert card is not None, "the new medium banner was not found"
+    assert card.property("visible") is False, "nothing is plugged in yet"
+
+    backend._on_device_inserted(payload)
+    for _ in range(30):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    assert alerts and alerts[0]["node"] == "/dev/sdb1"
+    assert backend.pendingDevice["displayName"] == "HOLIDAY"
+    assert notifications, "the notification the mode asks for was not shown"
+    assert "HOLIDAY" in notifications[0]
+    assert card.property("visible") is True, "the banner did not appear"
+    assert backend.state == IDLE, "notify mode must not read anything from the medium"
+
+    backend.dismissPendingDevice()
+    for _ in range(20):
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert backend.pendingDevice == {}
+    assert card.property("visible") is False
+
+    gui_app.teardown_engine(engine)
+
+
+def test_open_mode_selects_the_medium_without_starting_a_job(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        backend, "openDevice", lambda node, autorun=False: calls.append((node, autorun)) or True
+    )
+    monkeypatch.setattr(backend, "startJob", lambda options: calls.append(("job", dict(options))))
+    backend.config.watch.mode = "open"
+
+    backend._on_device_inserted({"node": "/dev/sdb1", "displayName": "HOLIDAY"})
+
+    assert calls == [("/dev/sdb1", False)]
+
+
+def test_open_run_mode_opens_the_medium_and_asks_for_the_job(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        backend, "openDevice", lambda node, autorun=False: opened.append((node, autorun)) or True
+    )
+    backend.config.watch.mode = "open_run"
+
+    backend._on_device_inserted({"node": "/dev/sdb1", "displayName": "HOLIDAY"})
+
+    assert opened == [("/dev/sdb1", True)], "open_run has to ask for the job as well"
+
+
+def test_opening_a_medium_with_autorun_starts_the_job(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dcs.gui.backend as backend_module
+
+    device = BlockDevice(
+        name="sdb1",
+        path="/dev/sdb1",
+        type="part",
+        size=7_600_000_000,
+        fstype="vfat",
+        label="HOLIDAY",
+        transport="usb",
+        removable=True,
+        mountpoints=["/media/aleks/HOLIDAY"],
+    )
+    jobs: list[dict[str, Any]] = []
+    monkeypatch.setattr(backend_module, "find_device", lambda node: device)
+    monkeypatch.setattr(backend, "refreshDevices", lambda: None)
+    monkeypatch.setattr(backend, "startJob", jobs.append)
+    backend.config.upload.enabled = True
+    backend.config.email.to_addrs = ["ops@example.test"]
+
+    assert backend.openDevice("/dev/sdb1", autorun=True) is True
+
+    assert len(jobs) == 1, "the automatic run has to start exactly one job"
+    assert jobs[0]["source"] == "/media/aleks/HOLIDAY"
+    assert jobs[0]["assumeYes"] is True, "nobody is at the keyboard to confirm"
+    assert jobs[0]["email"] is True
+    assert jobs[0]["recipients"] == "ops@example.test"
+
+
+def test_opening_a_medium_without_autorun_runs_nothing(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dcs.gui.backend as backend_module
+
+    device = BlockDevice(
+        name="sdb1",
+        path="/dev/sdb1",
+        type="part",
+        fstype="vfat",
+        label="HOLIDAY",
+        transport="usb",
+        removable=True,
+        mountpoints=["/media/aleks/HOLIDAY"],
+    )
+    jobs: list[dict[str, Any]] = []
+    monkeypatch.setattr(backend_module, "find_device", lambda node: device)
+    monkeypatch.setattr(backend, "refreshDevices", lambda: None)
+    monkeypatch.setattr(backend, "startJob", jobs.append)
+
+    assert backend.openDevice("/dev/sdb1") is True
+    assert jobs == []
+    assert backend.sourcePath == "/media/aleks/HOLIDAY"
+
+
+def test_an_automatic_run_without_a_recipient_still_makes_the_link(
+    backend: Backend,
+) -> None:
+    backend.config.email.to_addrs = []
+    backend.config.upload.enabled = True
+    backend.config.archive.enabled = True
+
+    options = backend.autoRunOptions()
+
+    assert options["email"] is False, "no recipient, no mail"
+    assert options["upload"] is True, "the link is the point of the automatic run"
+    assert options["archive"] is True
+
+
+def test_an_automatic_run_follows_the_disabled_switches(backend: Backend) -> None:
+    backend.config.upload.enabled = False
+    backend.config.archive.enabled = False
+
+    options = backend.autoRunOptions()
+
+    assert options["upload"] is False
+    assert options["archive"] is False
+    assert options["scan"] is True, "scanning always happens"
+
+
+def test_the_watcher_is_not_started_while_its_mode_is_off(backend: Backend) -> None:
+    assert backend.watchMode == "off"
+    assert backend.watcher.active is False
+    assert backend.watcher.poll() == []
+

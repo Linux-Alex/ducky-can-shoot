@@ -10,6 +10,38 @@ change between minor releases; each such change is listed below.
 
 ### Added
 
+- **The settings page keeps its buttons where you can see them, and "Test SMTP"
+  tests what is on screen.** The form is much taller than the window, so the
+  "Save settings" button at the end of it was easy to miss: changes could be left
+  unsaved without noticing, and the message that said so appeared at the top of
+  the page, out of sight while scrolling. The page now has a bar at the bottom
+  that never scrolls away. It says **Unsaved changes** or where the last save
+  landed, offers Revert and Save settings, and the SMTP section reports the result
+  of the connection test next to the button that asked for it. "Test SMTP" uses
+  the values currently in the form rather than the ones that were saved last,
+  which is why it used to fail and then work after saving.
+- **USB detection: react when a medium is plugged in.** Off by default, four
+  modes in **Settings -> USB detection** (or `[watch] mode`): `off` does nothing,
+  `notify` shows a desktop notification with an **Open Ducky Can Shoot** button,
+  `open` starts the interface with the new medium already selected, and
+  `open_run` starts the whole job - scan, archive, upload and, when a recipient
+  is configured, the email; without a recipient it stops after the report and
+  shows the link on the result page. The watcher polls lsblk every three seconds:
+  no root, no udev rule, no extra dependency, and it never mounts, reads or scans
+  anything by itself. A stick with two partitions is one medium and produces at
+  most one job, and while a window is open it does the watching itself, so the
+  background watcher never reacts a second time.
+- `dcs watch [--mode ...] [--interval S] [--once] [--status] [--json]`, the same
+  listener from the command line, and `dcs gui --device NODE [--autorun]`, which
+  is how a newly plugged medium is handed to a fresh window.
+- **Start the watcher with the session, if you want it.** `dcs config set
+  watch.autostart true`, the checkbox on the settings page, and
+  `scripts/install.sh --watch=notify|open|open_run` all write one autostart
+  entry. The installer asks, and "do nothing" is the default answer.
+- `dcs config set KEY VALUE` and `dcs config --options`: change one option from a
+  script with the same coercion and the same validation the loader uses, so a
+  value the configuration calls broken is refused instead of stored.
+
 - **Repository polish for the first public release**: a banner and badges, a front
   page organised around a quick start and the situation the tool is for, issue
   forms that ask the questions worth asking, a pull request template, a release

@@ -188,21 +188,23 @@ def list_block_devices(*, include_loop: bool = False) -> list[BlockDevice]:
     return devices
 
 
-def list_removable_devices(*, include_loop: bool = False) -> list[BlockDevice]:
-    """Devices a human would call a USB stick.
+def is_removable(device: BlockDevice) -> bool:
+    """True when a human would call this device a USB stick.
 
     A device qualifies when it is scannable and either flagged removable, or
     attached over usb/mmc, or hotplug capable.  Internal NVMe/SATA partitions
     are therefore excluded while USB enclosures that do not set the removable
     bit (very common) are still listed.
     """
-    result = []
-    for device in list_block_devices(include_loop=include_loop):
-        if not device.scannable:
-            continue
-        bus = device.transport.lower()
-        if device.removable or device.hotplug or bus in ("usb", "mmc", "sdio", "ieee1394"):
-            result.append(device)
+    if not device.scannable:
+        return False
+    bus = device.transport.lower()
+    return bool(device.removable or device.hotplug or bus in ("usb", "mmc", "sdio", "ieee1394"))
+
+
+def list_removable_devices(*, include_loop: bool = False) -> list[BlockDevice]:
+    """Every device a human would call a USB stick, mounted ones first."""
+    result = [d for d in list_block_devices(include_loop=include_loop) if is_removable(d)]
     result.sort(key=lambda d: (not d.mounted, d.name))
     return result
 

@@ -237,6 +237,36 @@ class GuiConfig:
     switch_to_result: bool = True
 
 
+#: the four reactions to a newly plugged medium, from silent to fully automatic
+WATCH_MODES = ("off", "notify", "open", "open_run")
+
+
+@dataclass
+class WatchConfig:
+    """What happens when a human plugs a medium in.
+
+    The watcher is a listener, not a service: it is started by the interface (or
+    by `dcs watch`, which the autostart entry runs) and it only ever *reacts* to
+    media that appear while it is running.  Media that are already attached when
+    it starts are ignored, so a stick that was plugged in yesterday does not
+    trigger anything when the session starts.
+    """
+
+    #: off      - never watch, never react
+    #: notify   - desktop notification with an "Open Ducky Can Shoot" button
+    #: open     - open the interface with the new medium selected
+    #: open_run - open the interface and start the job straight away
+    mode: str = "off"
+    #: seconds between two lsblk polls while the watcher runs
+    interval_s: float = 3.0
+    #: ignore media that are already attached when the watcher starts
+    ignore_existing: bool = True
+    #: how long the notification (and its button) stays on screen
+    notify_timeout_ms: int = 20000
+    #: start the watcher with the desktop session (the autostart entry)
+    autostart: bool = False
+
+
 @dataclass
 class AppConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
@@ -246,6 +276,7 @@ class AppConfig:
     email: EmailConfig = field(default_factory=EmailConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
+    watch: WatchConfig = field(default_factory=WatchConfig)
     #: where this config was loaded from (informational)
     source_path: str = ""
 
@@ -340,6 +371,12 @@ class AppConfig:
     def validation_problems(self) -> list[str]:
         """Human readable list of things that will break a run."""
         problems: list[str] = []
+        if self.watch.mode not in WATCH_MODES:
+            problems.append(
+                f"watch.mode must be one of {', '.join(WATCH_MODES)}, not {self.watch.mode!r}"
+            )
+        if self.watch.interval_s < 0.5:
+            problems.append(f"watch.interval_s must be at least 0.5, not {self.watch.interval_s!r}")
         if self.scan.engines:
             unknown = [e for e in self.scan.engines if e not in ("clamav", "heuristic")]
             if unknown:
@@ -364,6 +401,85 @@ class AppConfig:
             if self.email.security not in ("starttls", "ssl", "none", "plain"):
                 problems.append(f"email.security must be starttls/ssl/none, not {self.email.security!r}")
         return problems
+
+
+# ---------------------------------------------------------------------------
+# dotted option names ("watch.mode"), used by 'dcs config set'
+# ---------------------------------------------------------------------------
+
+
+def option_paths(config: AppConfig | None = None) -> list[str]:
+    """Every settable dotted option name, in configuration order."""
+    root = config or AppConfig()
+    names: list[str] = []
+    for section_field in fields(type(root)):
+        if section_field.name == "source_path":
+            continue
+        section = getattr(root, section_field.name)
+        if not is_dataclass(section):
+            continue
+        for field_info in fields(section):
+            if is_dataclass(_resolved_annotation(field_info.type)):
+                continue  # a nested table (scan.clamav) is not a single value
+            names.append(f"{section_field.name}.{field_info.name}")
+    return names
+
+
+def _resolved_annotation(annotation: Any) -> Any:
+    """Turn a (possibly postponed) annotation into the type it names.
+
+    "list[str]" is only a string here because of `from __future__ import
+    annotations`, so the subscript is stripped before the name is looked up:
+    without that, a list option would be stored as one long string.
+    """
+    if not isinstance(annotation, str):
+        return annotation
+    name = annotation.split("[", 1)[0].strip()
+    if name in _BUILTIN_TYPES:
+        return _BUILTIN_TYPES[name]
+    return _RESOLVE.get(name, annotation)
+
+
+def set_option(config: AppConfig, key: str, value: Any) -> tuple[bool, str]:
+    """Set one dotted option from a string, e.g. ("watch.mode", "notify").
+
+    Returns (ok, message).  The value goes through the same coercion the config
+    loader uses, so "false" lands as False, "4000" as 4000 and a comma separated
+    string as a list, and an unparseable value is refused instead of stored.
+    """
+    parts = [part for part in str(key).split(".") if part]
+    if len(parts) != 2:
+        return False, f"{key!r} is not an option name such as 'watch.mode'"
+    section_name, field_name = parts
+    section = getattr(config, section_name, None)
+    if not is_dataclass(section):
+        return False, f"there is no [{section_name}] section"
+    known = {field_info.name: field_info for field_info in fields(section)}
+    field_info = known.get(field_name)
+    if field_info is None:
+        return False, f"there is no option {key!r}"
+
+    annotation = _resolved_annotation(field_info.type)
+    if annotation is list or get_origin(annotation) is list:
+        items = value if isinstance(value, list) else [
+            part.strip() for part in str(value).replace(";", ",").split(",") if part.strip()
+        ]
+        setattr(section, field_name, items)
+        return True, f"{key} = {items!r}"
+
+    previous = getattr(section, field_name)
+    coerced = _coerce(field_info.type, value)
+    if coerced is UNCONVERTIBLE:
+        return False, f"{value!r} is not a valid value for {key}"
+    setattr(section, field_name, coerced)
+    # an option that the config itself calls a problem (an unknown mode, an
+    # unknown archive format, an interval that is too small) is refused here:
+    # 'dcs config show' would otherwise print a broken configuration
+    problems = [p for p in config.validation_problems() if key in p]
+    if problems:
+        setattr(section, field_name, previous)
+        return False, problems[0]
+    return True, f"{key} = {coerced!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +587,7 @@ _RESOLVE: dict[str, Any] = {
     "EmailConfig": EmailConfig,
     "ReportConfig": ReportConfig,
     "GuiConfig": GuiConfig,
+    "WatchConfig": WatchConfig,
 }
 
 

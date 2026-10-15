@@ -6,6 +6,52 @@ shows what the pipeline is doing.
 
 [Back to the README](../README.md)
 
+### The USB watcher does not do anything
+
+The watcher is off by default, and three things have to line up:
+
+```bash
+dcs watch --status
+```
+
+```text
+mode            : off          <- nothing is watched until this is notify/open/open_run
+watch interval  : 3s
+ignore existing : True
+autostart file  : ~/.config/autostart/org.kde.dcs.watch.desktop (installed)
+autostart runs  : /usr/bin/dcs watch
+interface       : not running
+would do        : nothing; the watcher exits immediately
+```
+
+- **`mode` is `off`** - turn it on with `dcs config set watch.mode notify` (or in
+  **Settings -> USB detection**).
+- **Nothing reacts while the interface is open** - that is on purpose: the window
+  watches for itself, so a medium cannot produce two notifications or two jobs.
+  The line `interface : running (pid N)` says so. Close the window and plug the
+  medium in again.
+- **It only reacts to media that appear *while it runs*** - a stick that was
+  already attached when the watcher started is ignored
+  (`watch.ignore_existing`). Unplug it, plug it back in.
+- **No notification appears** - `notify-send` comes from `libnotify-bin`:
+  `sudo apt install libnotify-bin`. Without it the medium is printed on standard
+  output of `dcs watch` instead, and the banner still appears in an open window.
+- **Nothing happens at login** - the autostart entry is a file, check that it
+  exists and that its `Exec=` starts a real launcher:
+  `cat ~/.config/autostart/org.kde.dcs.watch.desktop`. `dcs config set
+  watch.autostart true` writes it again.
+
+### The settings page says "Unsaved changes" but I saved
+
+The bar at the bottom of the settings page compares the whole draft with the file
+on disk. If it stays on "Unsaved changes", the save failed and the message next
+to it says why (`Could not save: ...`, usually permissions on
+`~/.config/dcs/config.toml`). `Revert` throws the draft away and reloads what is
+stored on disk.
+
+**Test SMTP** always tests the values that are in the form, saved or not, so a
+server can be checked before anything is written to the configuration file.
+
 ### The interface does not start: a QML module is missing
 
 ```text

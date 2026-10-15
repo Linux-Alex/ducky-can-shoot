@@ -44,6 +44,89 @@ Controls.ScrollView {
                   + "nothing is archived or uploaded."
         }
 
+        // --------------------------------------------------------- new medium
+        // A medium was plugged in while the watcher was running.  This card is
+        // what the notification leads to, and it stays until it is answered:
+        // nothing is read from the medium before that.
+        Kirigami.Card {
+            id: newDeviceCard
+            objectName: "newDeviceCard"
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.gridUnit
+            Layout.rightMargin: Kirigami.Units.gridUnit
+            visible: backend.pendingDevice !== undefined
+                     && backend.pendingDevice.node !== undefined
+                     && backend.pendingDevice.node !== ""
+            padding: Kirigami.Units.largeSpacing
+
+            contentItem: ColumnLayout {
+                spacing: Kirigami.Units.smallSpacing
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.largeSpacing
+
+                    Kirigami.Icon {
+                        source: "drive-removable-media-usb"
+                        implicitWidth: Kirigami.Units.iconSizes.medium
+                        implicitHeight: Kirigami.Units.iconSizes.medium
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            font.bold: true
+                            text: "A medium was plugged in: "
+                                  + (backend.pendingDevice.summary || backend.pendingDevice.node)
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            opacity: 0.8
+                            text: "Nothing has been read from it yet. Scan it now, or select it and "
+                                  + "choose what the job should do."
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    Controls.Button {
+                        objectName: "dismissDeviceButton"
+                        text: "Dismiss"
+                        icon.name: "dialog-cancel"
+                        onClicked: backend.dismissPendingDevice()
+                    }
+
+                    Controls.Button {
+                        text: "Select it"
+                        icon.name: "go-next"
+                        onClicked: backend.acceptPendingDevice()
+                    }
+
+                    Controls.Button {
+                        objectName: "scanDeviceButton"
+                        text: "Scan it now"
+                        icon.name: "media-playback-start"
+                        highlighted: true
+                        enabled: backend.state !== "running"
+                        onClicked: backend.runPendingDevice()
+                    }
+                }
+            }
+        }
+
         // ---------------------------------------------------------------- devices
         Kirigami.Card {
             Layout.fillWidth: true

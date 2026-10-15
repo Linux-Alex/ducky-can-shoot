@@ -35,7 +35,8 @@ the real ones.
     +----------------+    +-----------------+    +------------------+
     | dcs/cli.py     |    | dcs/gui/        |    | tests/           |
     | CliSink        |    | SignalSink      |    | CollectingSink   |
-    | exit_code_for  |    | models.py       |    | fakes/clamscan   |
+    | dcs watch      |    | watcher.py      |    | fakes/clamscan   |
+    | exit_code_for  |    | models.py       |    |                  |
     +--------+-------+    +--------+--------+    +---------+--------+
              |                     |                       |
              +----------+----------+-----------+-----------+
@@ -68,6 +69,9 @@ the real ones.
                  dcs.core.result            +---------------------+
                  dcs.core.log
                  dcs.core.util
+                 dcs.core.watch      (polls lsblk, Qt free)
+                 dcs.core.session    (which DCS is running)
+                 dcs.core.autostart  (the login entry)
 ```
 
 Dependency direction is strictly downwards: the front ends import `dcs.core, the
@@ -102,8 +106,13 @@ and even then only through a plain listener callback.
 | `dcs/core/installer.py` | Package-manager detection, the ClamAV installation plan, the generated script and its runner (pkexec, terminal, sudo). |
 | `dcs/core/util.py` | Formatting, the tolerant file walker, hashing, atomic writes, subprocess helpers. |
 | `dcs/core/log.py` | Logging setup plus a ring buffer with listeners, so the GUI can show the tail. |
-| `dcs/gui/backend.py` | The object QML talks to: models, device polling, job control, settings, desktop integration. |
+| `dcs/core/watch.py` | `DeviceWatcher`: polls lsblk, groups partitions into physical disks and reports the media that appeared since the previous poll. No Qt, no mounting, no reading. |
+| `dcs/core/session.py` | The pid file that says whether an interface is running, so the window and the background watcher never both react. |
+| `dcs/core/autostart.py` | Reads and writes the XDG autostart entry that runs `dcs watch` at login. |
+| `dcs/core/notify/desktop.py` | `DesktopNotifier`: a notification with an action button through `notify-send --wait`, with a Qt-free fallback to the log. |
+| `dcs/gui/backend.py` | The object QML talks to: models, device polling, job control, settings, desktop integration, the four USB reactions. |
 | `dcs/gui/worker.py` | `PipelineWorker` (runs one job on a thread) and `SignalSink`. |
+| `dcs/gui/watcher.py` | `UsbWatcher`: a QTimer around `dcs.core.watch`, and the "new medium" signal the interface binds to. |
 | `dcs/gui/models.py` | Five list models: devices, stages, findings, log, throughput. |
 | `dcs/gui/app.py` | Qt application setup, QML import paths, window geometry persistence. |
 | `dcs/gui/qml/` | `Main.qml` plus `views/` and `components/`. No logic worth testing. |
@@ -198,6 +207,40 @@ wrong:
 Because the core has no Qt imports, none of this is required to use it: the CLI
 runs the pipeline on the calling thread, and the tests run it with a
 `CollectingSink`.
+
+## Watching for new media
+
+Plugging a stick in may or may not be interesting, so the feature is split the
+same way as everything else: the mechanism has no Qt, the reaction does.
+
+| Module | Thread | Owns |
+| --- | --- | --- |
+| `dcs.core.watch` | any | `DeviceWatcher`: polls lsblk, reports one `DeviceEvent` per *physical disk* that appeared since the previous poll. Never mounts, never reads a file |
+| `dcs.core.session` | any | the pid file in `$XDG_RUNTIME_DIR/ducky-can-shoot/gui.pid` that says whether an interface is running |
+| `dcs.core.autostart` | any | `~/.config/autostart/org.kde.dcs.watch.desktop`, the entry that runs `dcs watch` at login |
+| `dcs.core.notify.desktop` | worker | a notification with an action button, through `notify-send --wait` (no Qt, no D-Bus client) |
+| `dcs.gui.watcher` | GUI | `UsbWatcher`: a `QTimer` around `DeviceWatcher` that turns events into a signal |
+| `dcs.gui.backend` | GUI | what the four modes actually do: banner, notification, select, start the job |
+
+Decisions worth remembering:
+
+- **Polling, not udev.** One lsblk call every three seconds needs no root, no udev
+  rule, no D-Bus connection and no extra dependency, and it works the same in a
+  container and over SSH. The cost is a sub-millisecond process every three
+  seconds while the feature is on.
+- **One event per disk.** Partitions of the same stick are grouped through the
+  disk nodes lsblk reports, so a two-partition stick is one notification and at
+  most one job, and the mounted partition is the one that is used.
+- **Exactly one reaction.** A running interface claims the session marker; the
+  background watcher checks it before every reaction and stays quiet while the
+  window is open. The window watches for itself in the meantime. Close the window
+  and the background watcher reacts again - the marker is checked per event, not
+  once at startup.
+- **Nothing happens before the user asked.** The mode is `off` by default, media
+  that were already attached are ignored (`ignore_existing`), and no mode mounts
+  or reads anything: the watcher hands a device node to the interface, which is
+  where "scan", "archive", "upload" and "email" still have to be enabled by the
+  configuration.
 
 ## Installing the optional ClamAV engine
 
