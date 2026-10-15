@@ -8,6 +8,57 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
+### Changed
+
+- **The interface follows the KDE Human Interface Guidelines now.** The
+  guidelines were read page by page and the differences fixed:
+
+  - **Navigation.** Five destinations that are not a linear workflow are a
+    `Kirigami.NavigationTabBar` ("with five or fewer destinations, use a
+    Kirigami.NavigationTabBar"); it is also the control for immutable tabs, which
+    is what these are.
+  - **Messages.** The home made toast popup is gone: messages the user may
+    ignore go through `showPassiveNotification`. A system notification is only
+    sent while the window is *not* in the foreground, so plugging a medium in no
+    longer pops a notification on top of the window that already shows the same
+    thing.
+  - **Settings page.** Invalid input is shown in a `Kirigami.InlineMessage` and
+    disables **Save Settings** until the draft is valid again; the password uses
+    `Kirigami.PasswordField`; the sentence about leaving it empty sits inline
+    under the field instead of inside the placeholder (a placeholder is an
+    example, not an instruction); and the longer explanation of the autostart
+    entry moved into a `Kirigami.ContextualHelpButton`, because three sentences
+    of inline description overrun the card.
+  - **Text.** Interactive labels are in title case ("Save Settings", "Open Report
+    Folder", "New Job"), while labels in front of a control, checkbox labels and
+    combo box items stay in sentence case, and every action that opens a dialog
+    ends with the real ellipsis character `…` instead of three periods.
+  - **Links.** The homepage on the About page is an underlined link instead of a
+    button ("to open URLs, use underlined web-style links, not buttons").
+  - **Long jobs.** While a job runs, its completion percentage is reported to the
+    task manager (`setBadgeNumber`), which the guidelines ask for on a long task
+    the user started.
+  - **Spacing.** Title, description and messages form a group with
+    `smallSpacing`, and the bar at the bottom of the settings page uses
+    `mediumSpacing` between its buttons.
+- **Email is off in a fresh configuration.** An installation with neither an SMTP
+  server nor a recipient cannot send anything, so the default said one thing and
+  the validator said another: the settings page of a new installation opened with
+  a warning and a disabled Save button. Email is now enabled once a server and a
+  recipient are configured, `dcs run --to ADDRESS` still sends without that (an
+  explicit recipient is an instruction to send), and a job reports missing
+  settings as an actionable reason instead of failing.
+- **The application icon is the project's own artwork.** A duck holding a pistol
+  whose muzzle faces the viewer, wings on both sides - one hand written SVG in
+  `packaging/icons/hicolor/scalable/apps/org.kde.dcs.svg`, drawn on a light badge
+  so the dark gun stays visible on a dark panel, next to a Breeze style symbolic
+  variant (`org.kde.dcs-symbolic.svg`: one colour through `currentColor`, with
+  the eyes and the barrel cut out by `fill-rule="evenodd"`) and the nine bitmap
+  sizes a distribution package still ships. `scripts/make-icons.sh` (and
+  `make icons`) renders the bitmaps from the SVG, `scripts/install.sh` installs
+  the whole set into `hicolor` and `scripts/uninstall.sh` removes it again, and
+  the About page shows the same drawing inside the window.
+
 ### Added
 
 - **The settings page keeps its buttons where you can see them, and "Test SMTP"

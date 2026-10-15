@@ -207,7 +207,7 @@ Kirigami.Dialog {
             }
 
             Controls.Label {
-                text: dialog.running ? "Installing..." : (dialog.outcome.ok === true ? "Finished" : "Did not finish")
+                text: dialog.running ? "Installing…" : (dialog.outcome.ok === true ? "Finished" : "Did not finish")
                 font: Kirigami.Theme.smallFont
             }
         }
@@ -285,18 +285,18 @@ Kirigami.Dialog {
 
     customFooterActions: [
         Kirigami.Action {
-            text: "Open the script"
+            text: "Open the Script"
             icon.name: "text-x-script"
             visible: dialog.plan.scriptPath !== undefined && dialog.plan.scriptPath !== ""
             onTriggered: backend.openPath(dialog.plan.scriptPath)
         },
         Kirigami.Action {
-            text: "Copy commands"
+            text: "Copy Commands"
             icon.name: "edit-copy"
             onTriggered: backend.copyText(dialog.plan.manual || "")
         },
         Kirigami.Action {
-            text: "Re-check engine"
+            text: "Re-check Engine"
             icon.name: "view-refresh"
             onTriggered: backend.verifyClamav()
         },

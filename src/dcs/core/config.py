@@ -183,7 +183,12 @@ class UploadConfig:
 
 @dataclass
 class EmailConfig:
-    enabled: bool = True
+    #: Off until a server and a recipient are configured: an installation that
+    #: has neither cannot send anything, and a configuration that its own
+    #: validator calls broken is a bad starting point (the settings page would
+    #: open with a warning and refuse to save).  The pipeline reports the reason
+    #: it skipped the stage either way.
+    enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 587
     #: starttls | ssl | none

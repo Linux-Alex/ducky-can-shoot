@@ -328,6 +328,7 @@ provider = "gofile"
 upload_when = "clean"                 # never publish a malicious image
 
 [email]
+enabled = true                        # off until a server and a recipient are set
 smtp_host = "smtp.example.org"
 from_addr = "dcs@example.org"
 to_addrs = ["security@example.org"]

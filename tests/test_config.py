@@ -39,6 +39,9 @@ def python_command(source: str) -> str:
 def sane_config() -> AppConfig:
     """An AppConfig that validation_problems() must accept without complaint."""
     config = AppConfig()
+    # email is off until a server and a recipient are configured, so a config
+    # that *uses* email has to ask for it
+    config.email.enabled = True
     config.email.smtp_host = "smtp.example.test"
     config.email.from_addr = "dcs@example.test"
     config.email.to_addrs = ["ops@example.test"]
@@ -70,7 +73,10 @@ def test_defaults() -> None:
     assert config.email.security == "starttls"
     assert config.email.smtp_port == 587
     assert config.email.subject_template == "[DCS] {verdict} - {device} ({files} files)"
-    assert config.email.enabled is True
+    # off by default: an installation without an SMTP server and a recipient
+    # cannot send anything, and the settings page would open with a warning and
+    # a disabled Save button
+    assert config.email.enabled is False
     assert config.report.format == "html"
     assert config.report.directory == ""
     assert config.gui.window_width == 1180
@@ -737,6 +743,7 @@ def test_save_without_secrets_writes_the_masked_values(tmp_path: Path) -> None:
 
 def test_validation_problems_requires_the_email_essentials() -> None:
     config = AppConfig()
+    config.email.enabled = True
 
     assert config.validation_problems() == [
         "email.enabled is true but email.smtp_host is empty",
@@ -807,11 +814,9 @@ def test_validation_problems_reports_a_bad_email_security() -> None:
 
 def test_validation_problems_is_empty_for_a_sane_config() -> None:
     assert sane_config().validation_problems() == []
-    assert load_config(None, system_path=None).validation_problems() == [
-        "email.enabled is true but email.smtp_host is empty",
-        "email.enabled is true but email.from_addr is empty",
-        "email.enabled is true but no recipient is configured",
-    ]
+    # a fresh installation is valid as it stands: the settings page shows no
+    # warning and can save, because email is off until it is configured
+    assert load_config(None, system_path=None).validation_problems() == []
 
 
 # ---------------------------------------------------------------------------

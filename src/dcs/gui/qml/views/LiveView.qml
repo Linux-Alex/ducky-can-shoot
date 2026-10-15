@@ -280,7 +280,7 @@ Controls.ScrollView {
                 Controls.Label {
                     visible: backend.findings.count === 0
                     opacity: 0.6
-                    text: backend.state === "running" ? "Nothing suspicious so far..." : "No findings."
+                    text: backend.state === "running" ? "Nothing suspicious so far…" : "No findings."
                 }
 
                 ListView {

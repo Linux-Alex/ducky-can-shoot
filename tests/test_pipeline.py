@@ -77,15 +77,20 @@ def run_job(
     *,
     cancel: threading.Event | None = None,
     label: str = "testusb",
+    recipients: list[str] | None = None,
     **overrides: Any,
 ) -> tuple[JobResult, CollectingSink]:
-    """Run one pipeline job over *source* and return (result, sink)."""
+    """Run one pipeline job over *source* and return (result, sink).
+
+    An explicit recipient is an instruction to send, so pass `recipients=[]` to
+    test what happens without one.
+    """
     sink = CollectingSink()
     request = JobRequest(
         source_path=str(source),
         label=label,
         email_dry_run=True,
-        recipients=["ops@example.test"],
+        recipients=["ops@example.test"] if recipients is None else list(recipients),
         **overrides,
     )
     return Pipeline(config).run(request, sink=sink, cancel=cancel), sink
@@ -340,7 +345,10 @@ def test_email_stage_is_skipped_when_notifications_are_disabled(
     """email.enabled = false skips the stage and writes no message at all."""
     tmp_config.email.enabled = False
 
-    result, sink = run_job(tmp_config, clean_tree)
+    # no recipient either: a recipient on the command line means "send it", which
+    # is what makes 'dcs run --to someone@example.org' work on an installation
+    # whose configuration has email turned off
+    result, sink = run_job(tmp_config, clean_tree, recipients=[])
 
     states = sink.stage_states()
     assert states[Stage.REPORT] is StageState.DONE

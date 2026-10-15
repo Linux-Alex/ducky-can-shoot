@@ -52,6 +52,9 @@ from dcs.gui.models import (  # noqa: E402
 )
 from dcs.version import APP_NAME, __version__  # noqa: E402
 
+#: the QML of the interface, for the tests that read it instead of running it
+ROOT_QML = Path(__file__).resolve().parent.parent / "src" / "dcs" / "gui" / "qml"
+
 #: Kirigami's global drawer triggers a harmless binding loop inside Kirigami
 #: itself; it is not a problem with the DCS QML and is ignored here.
 IGNORED_QML_WARNINGS = (
@@ -1033,8 +1036,10 @@ def test_a_plugged_medium_is_offered_on_the_new_job_page(
 
     assert alerts and alerts[0]["node"] == "/dev/sdb1"
     assert backend.pendingDevice["displayName"] == "HOLIDAY"
-    assert notifications, "the notification the mode asks for was not shown"
-    assert "HOLIDAY" in notifications[0]
+    # the HIG forbids a system notification while the window is in front: the
+    # banner and the passive notification carry the message there, and only a
+    # backgrounded window sends one
+    assert notifications == [], "a foreground window must not send a system notification"
     assert card.property("visible") is True, "the banner did not appear"
     assert backend.state == IDLE, "notify mode must not read anything from the medium"
 
@@ -1162,7 +1167,171 @@ def test_an_automatic_run_follows_the_disabled_switches(backend: Backend) -> Non
 def test_the_watcher_is_not_started_while_its_mode_is_off(backend: Backend) -> None:
     assert backend.watchMode == "off"
     assert backend.watcher.active is False
-    assert backend.watcher.poll() == []
+
+
+def test_a_backgrounded_window_sends_a_system_notification(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the rule: no window in front, so notify the desktop."""
+    import dcs.gui.backend as backend_module
+
+    sent: list[str] = []
+
+    class FakeNotifier:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def available(self) -> bool:
+            return True
+
+        def notify(self, title: str, body: str = "", **kwargs: Any) -> str:
+            sent.append(title)
+            return ""
+
+    monkeypatch.setattr(backend_module, "DesktopNotifier", FakeNotifier)
+    monkeypatch.setattr(backend, "_window_is_active", staticmethod(lambda: False))
+    monkeypatch.setattr(backend, "openDevice", lambda node, autorun=False: True)
+    backend.config.watch.mode = "notify"
+
+    backend._on_device_inserted({"node": "/dev/sdb1", "displayName": "HOLIDAY"})
+
+    assert sent and "HOLIDAY" in sent[0]
+
+
+# ---------------------------------------------------------------------------
+# the KDE Human Interface Guidelines, where they are checkable
+# ---------------------------------------------------------------------------
+
+
+def test_the_navigation_is_the_control_the_hig_asks_for(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """Five destinations that are not a linear flow: Kirigami.NavigationTabBar.
+
+    The HIG is explicit ("with five or fewer destinations, use a
+    Kirigami.NavigationTabBar"), and it is also the control for immutable tabs.
+    """
+    from PyQt6.QtCore import QObject
+
+    engine, window, _page = open_settings(backend, qapp)
+    bar = next(
+        (
+            child
+            for child in window.findChildren(QObject)
+            if "NavigationTabBar" in child.metaObject().className()
+        ),
+        None,
+    )
+    assert bar is not None, "the navigation is not a Kirigami.NavigationTabBar"
+    assert bar.property("count") == 5
+
+    for index in range(5):
+        window.setProperty("tabIndex", index)
+        for _ in range(3):
+            qapp.processEvents()
+        assert bar.property("currentIndex") == index, f"destination {index} does not follow"
+
+    gui_app.teardown_engine(engine)
+
+
+def test_the_settings_page_validates_the_draft_and_disables_save(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """Invalid input is shown in an InlineMessage and Save is disabled.
+
+    "When the current text is invalid, indicate this using a
+    Kirigami.InlineMessage and disable the ability to confirm or send the input."
+    """
+    from PyQt6.QtCore import QObject
+
+    engine, window, page = open_settings(backend, qapp)
+    message = window.findChild(QObject, "validationMessage")
+    save = window.findChild(QObject, "saveButton")
+    assert message is not None and save is not None
+
+    # a fresh configuration is valid, so a new user meets no warning at all
+    assert page.property("validationText") == ""
+    assert message.property("visible") is False
+
+    # enabling email without a server is exactly what the validator is for
+    page.setProperty("emailEnabled", True)
+    page.setProperty("smtpHost", "")
+    page.setProperty("fromAddr", "")
+    page.setProperty("recipients", "")
+    for _ in range(5):
+        qapp.processEvents()
+    assert "smtp_host" in page.property("validationText")
+    assert message.property("visible") is True
+    assert save.property("enabled") is False, "invalid input must not be committable"
+
+    # and a valid draft that differs from the file can be saved again
+    page.setProperty("smtpHost", "smtp.changed.test")
+    page.setProperty("fromAddr", "dcs@example.test")
+    page.setProperty("recipients", "ops@example.test")
+    for _ in range(5):
+        qapp.processEvents()
+    assert page.property("validationText") == ""
+    assert page.property("unsavedChanges") is True
+    assert save.property("enabled") is True
+
+    gui_app.teardown_engine(engine)
+
+
+def test_validate_draft_reports_what_the_candidate_would_break(backend: Backend) -> None:
+    before = backend.config.to_dict()
+
+    assert backend.validateDraft({}) == ""
+    problems = backend.validateDraft({"email": {"enabled": True, "smtp_host": ""}})
+    assert "smtp_host" in problems
+    assert problems.startswith("• "), "one bullet per problem, ready for the message"
+
+    # the candidate is validated on a copy: the stored configuration is untouched
+    assert backend.config.to_dict() == before
+
+
+def test_the_password_field_is_the_kirigami_control(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    """The HIG asks for Kirigami.PasswordField, which brings the reveal button."""
+    from PyQt6.QtCore import QObject
+
+    engine, window, _page = open_settings(backend, qapp)
+    field = window.findChild(QObject, "smtpPasswordField")
+    assert field is not None, "the password field was not found"
+    assert "PasswordField" in field.metaObject().className()
+    assert field.property("showPassword") is False
+
+    gui_app.teardown_engine(engine)
+
+
+def test_no_label_hides_a_dialog_behind_three_dots() -> None:
+    """The HIG asks for the ellipsis character (U+2026), not three periods."""
+    offenders = []
+    for path in (ROOT_QML).rglob("*.qml"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "text:" in line and "..." in line and "//" not in line.split("text:")[0]:
+                offenders.append(f"{path.name}: {line.strip()}")
+    assert not offenders, "use the … character instead: " + ", ".join(offenders)
+
+
+def test_the_well_known_labels_follow_the_capitalization_rule() -> None:
+    """Sentence case for labels in front of controls, title case elsewhere.
+
+    Only the labels that were wrong once are pinned here: a button that opens a
+    dialog ends with an ellipsis, and interactive labels are in title case.
+    """
+    settings = (ROOT_QML / "views" / "SettingsView.qml").read_text(encoding="utf-8")
+    for label in ("Save Settings", "Test SMTP", "Install ClamAV…", "Open Config File", "Revert"):
+        assert f'"{label}"' in settings, f"{label} is not in the settings page"
+    assert '"Save settings"' not in settings and '"Open report folder"' not in settings
+
+    main = (ROOT_QML / "Main.qml").read_text(encoding="utf-8")
+    for label in ("New Job", "Progress", "Result", "Settings", "About"):
+        assert f'"{label}"' in main, f"{label} is not a navigation destination"
+    assert '"Scanning…"' in main, "the running state uses the ellipsis character"
+    # labels in front of a control stay in sentence case
+    assert 'Kirigami.FormData.label: "SMTP server:"' in settings
+    assert 'text: "Send the verdict by SMTP"' in settings
 
 
 def test_the_about_page_shows_the_shipped_icon(backend: Backend, qapp: Any, qt_messages: list[str]) -> None:

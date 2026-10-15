@@ -653,11 +653,18 @@ class _RunContext:
         config = self.config.email
         if self.request.do_email is False:
             return False, "disabled for this run"
-        if self.request.do_email is None and not config.enabled:
+        # an explicit recipient is an instruction to send, even when the
+        # configuration has email turned off
+        if self.request.do_email is None and not config.enabled and not self.request.recipients:
             return False, "email notifications are disabled in the configuration"
         recipients = self.request.recipients or config.to_addrs
         if not recipients:
             return False, "no recipient address is configured"
+        if not config.smtp_host or not config.from_addr:
+            return False, (
+                "the SMTP server or the sender address is missing: set email.smtp_host and "
+                "email.from_addr (Settings, Email, or 'dcs config set email.smtp_host')"
+            )
         if not config.always_send and self.result.verdict is Verdict.CLEAN:
             return False, (
                 "email.always_send is false and the medium is clean, so no message was sent"

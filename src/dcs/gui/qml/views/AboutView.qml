@@ -137,20 +137,24 @@ Controls.ScrollView {
                     text: "Links"
                 }
 
-                RowLayout {
-                    spacing: Kirigami.Units.smallSpacing
+                // A URL is a link, not a button (HIG: "To open URLs, use
+                // underlined web-style links, not buttons"), so only the local
+                // action stays a button.
+                Controls.Label {
+                    objectName: "homepageLink"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.RichText
+                    onLinkActivated: (link) => backend.openUrl(link)
+                    text: "Homepage: <a href=\"" + backend.appHomepage + "\">"
+                          + backend.appHomepage + "</a>"
+                }
 
-                    Controls.Button {
-                        text: "Homepage"
-                        icon.name: "internet-services"
-                        onClicked: backend.openUrl(backend.appHomepage)
-                    }
-
-                    Controls.Button {
-                        text: "Open config file"
-                        icon.name: "document-open"
-                        onClicked: backend.openConfig()
-                    }
+                Controls.Button {
+                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    text: "Open Config File"
+                    icon.name: "document-open"
+                    onClicked: backend.openConfig()
                 }
 
                 Controls.Label {

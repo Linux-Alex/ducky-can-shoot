@@ -11,7 +11,7 @@ import org.kde.kirigami as Kirigami
     API keys) are never read back from disk: leave the field empty to keep the
     stored value, or use the environment variable / helper command instead.
 
-    The form scrolls, the buttons do not: "Save settings" sits in a bar at the
+    The form scrolls, the buttons do not: "Save Settings" sits in a bar at the
     bottom of the page and is visible from every scroll position, next to
     whether the draft differs from the file on disk.  "Test SMTP" tests the
     values that are in the form, not the ones that were saved last.
@@ -65,6 +65,11 @@ Item {
 
     //! true while "Test SMTP" is waiting for the server
     property bool smtpTesting: false
+
+    //! what the configuration would complain about if this draft were saved:
+    //! shown in the message above the cards, and it keeps Save disabled while
+    //! it is not empty (the HIG's "validate and disable confirm" rule)
+    readonly property string validationText: backend.validateDraft(draftPayload())
 
     //! JSON of the draft as it was loaded (or last saved), so the bar at the
     //! bottom can say whether there is anything to save
@@ -255,28 +260,46 @@ Item {
                     Layout.preferredHeight: Kirigami.Units.largeSpacing
                 }
 
-                Kirigami.Heading {
-                    Layout.leftMargin: Kirigami.Units.gridUnit
-                    level: 1
-                    text: "Settings"
-                }
-
-                Controls.Label {
+                // Title, description and messages form one group, so they sit
+                // closer to each other than to the cards below (HIG: spacing
+                // between a title group and other content is smallSpacing).
+                ColumnLayout {
+                    Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.gridUnit
                     Layout.rightMargin: Kirigami.Units.gridUnit
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    opacity: 0.75
-                    text: "Stored in " + backend.configPath + ". Secrets stay out of the file: set "
-                          + "DCS_SMTP_PASSWORD, DCS_GOFILE_TOKEN or DCS_PIXELDRAIN_API_KEY in the environment instead."
-                }
+                    spacing: Kirigami.Units.smallSpacing
 
-                Kirigami.InlineMessage {
-                    id: testOutput
-                    Layout.leftMargin: Kirigami.Units.gridUnit
-                    Layout.rightMargin: Kirigami.Units.gridUnit
-                    Layout.fillWidth: true
-                    visible: false
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        level: 1
+                        text: "Settings"
+                    }
+
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        opacity: 0.75
+                        text: "Stored in " + backend.configPath + ". Secrets stay out of the file: set "
+                              + "DCS_SMTP_PASSWORD, DCS_GOFILE_TOKEN or DCS_PIXELDRAIN_API_KEY in the environment instead."
+                    }
+
+                    // The HIG asks for an InlineMessage when input is invalid,
+                    // and for the action that would commit it to be disabled.
+                    Kirigami.InlineMessage {
+                        id: validationMessage
+                        objectName: "validationMessage"
+                        Layout.fillWidth: true
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        visible: text.length > 0
+                        type: Kirigami.MessageType.Warning
+                        text: view.validationText
+                    }
+
+                    Kirigami.InlineMessage {
+                        id: testOutput
+                        Layout.fillWidth: true
+                        visible: false
+                    }
                 }
 
                 // ------------------------------------------------------------ scanning
@@ -363,7 +386,7 @@ Item {
 
                                 Controls.Button {
                                     visible: !engineLine.modelData.available
-                                    text: "Install ClamAV..."
+                                    text: "Install ClamAV…"
                                     icon.name: "install"
                                     onClicked: view.installRequested()
                                 }
@@ -514,7 +537,7 @@ Item {
                             RowLayout {
                                 Kirigami.FormData.label: "Reachability:"
                                 Controls.Button {
-                                    text: "Test provider"
+                                    text: "Test Provider"
                                     icon.name: "network-connect"
                                     onClicked: backend.testProvider(view.provider)
                                 }
@@ -587,13 +610,28 @@ Item {
                                 onTextEdited: view.smtpUser = text
                             }
 
-                            Controls.TextField {
+                            // Kirigami.PasswordField: the HIG's control for a
+                            // password, with the reveal button built in.
+                            Kirigami.PasswordField {
+                                objectName: "smtpPasswordField"
                                 Kirigami.FormData.label: "Password:"
                                 Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-                                echoMode: TextInput.Password
-                                placeholderText: "leave empty to keep the stored value"
                                 text: view.smtpPassword
                                 onTextEdited: view.smtpPassword = text
+                            }
+
+                            // One short sentence under the control it explains
+                            // (the HIG's rule for inline help; a placeholder is
+                            // for an example, not for instructions).
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                                wrapMode: Text.WordWrap
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                text: "Leave empty to keep the password that is already stored. "
+                                      + "Secrets are best kept out of the file entirely: set "
+                                      + "DCS_SMTP_PASSWORD in the environment instead."
                             }
 
                             Controls.TextField {
@@ -630,7 +668,7 @@ Item {
 
                                 Controls.Button {
                                     objectName: "testSmtpButton"
-                                    text: view.smtpTesting ? "Testing..." : "Test SMTP"
+                                    text: view.smtpTesting ? "Testing…" : "Test SMTP"
                                     icon.name: "network-connect"
                                     enabled: !view.smtpTesting
                                     onClicked: {
@@ -684,9 +722,8 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.WordWrap
                             opacity: 0.8
-                            text: "What should happen when a medium is plugged in while Ducky Can Shoot "
-                                  + "is running, or while you are logged in? Off by default: nothing is "
-                                  + "watched until you choose one of the modes below."
+                            text: "What should happen when a medium is plugged in? Off by default: "
+                                  + "nothing is watched until a mode is chosen below."
                         }
 
                         Controls.ComboBox {
@@ -715,25 +752,32 @@ Item {
                             text: view.watchModeDescription
                         }
 
-                        Controls.CheckBox {
-                            id: autostartCheck
-                            objectName: "watchAutostartCheck"
+                        RowLayout {
                             Layout.fillWidth: true
-                            enabled: view.watchMode !== "off"
-                            text: "Start the watcher with my session"
-                            checked: view.watchAutostart
-                            onToggled: view.watchAutostart = checked
-                        }
+                            spacing: Kirigami.Units.smallSpacing
 
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            wrapMode: Text.WordWrap
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.6
-                            text: "With autostart, a small background command (" + backend.autostartPath
-                                  + ") starts with your desktop session and watches for new media. "
-                                  + "It only ever looks at the list of block devices: no file is read "
-                                  + "until you agree to a scan."
+                            Controls.CheckBox {
+                                id: autostartCheck
+                                objectName: "watchAutostartCheck"
+                                Layout.fillWidth: true
+                                enabled: view.watchMode !== "off"
+                                text: "Start the watcher with my session"
+                                checked: view.watchAutostart
+                                onToggled: view.watchAutostart = checked
+                            }
+
+                            // Three sentences of explanation would overrun this
+                            // card, which is what the HIG's contextual help
+                            // button is for.
+                            Kirigami.ContextualHelpButton {
+                                objectName: "watchHelpButton"
+                                toolTipText: "With this on, " + backend.autostartPath
+                                    + " runs a small background command with your desktop session "
+                                    + "and watches for new media. It only ever looks at the list of "
+                                    + "block devices: no file is read until a scan is agreed to. "
+                                    + "While this window is open it does the watching itself, so a "
+                                    + "medium is never reported twice."
+                            }
                         }
 
                         Controls.Label {
@@ -743,19 +787,9 @@ Item {
                             opacity: 0.75
                             text: view.recipientsConfigured
                                   ? "A recipient is configured, so the automatic run also sends the email."
-                                  : "No recipient is configured, so the automatic run stops after the "
-                                    + "report: you get the archive link on the Result page. Add a "
-                                    + "recipient in the email section above to have it sent automatically."
-                        }
-
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            wrapMode: Text.WordWrap
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.6
-                            visible: view.watchMode !== "off"
-                            text: "While this window is open it does the watching itself, so the "
-                                  + "notification never arrives twice."
+                                  : "Without a recipient the automatic run stops after the report and "
+                                    + "shows the link on the Result page. Add one above to have the "
+                                    + "email sent too."
                         }
                     }
                 }
@@ -816,13 +850,13 @@ Item {
                                 spacing: Kirigami.Units.smallSpacing
 
                                 Controls.Button {
-                                    text: "Open config file"
+                                    text: "Open Config File"
                                     icon.name: "document-open"
                                     onClicked: backend.openConfig()
                                 }
 
                                 Controls.Button {
-                                    text: "Open report folder"
+                                    text: "Open Report Folder"
                                     icon.name: "folder-open"
                                     onClicked: backend.openPath(backend.settings.report.directory !== ""
                                                                 ? backend.settings.report.directory
@@ -860,7 +894,8 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: Kirigami.Units.gridUnit
                 anchors.rightMargin: Kirigami.Units.gridUnit
-                spacing: Kirigami.Units.largeSpacing
+                // toolbar spacing (HIG: mediumSpacing between buttons in a bar)
+                spacing: Kirigami.Units.mediumSpacing
 
                 Kirigami.Icon {
                     source: view.unsavedChanges ? "dialog-warning" : "dialog-ok-apply"
@@ -892,9 +927,10 @@ Item {
                 Controls.Button {
                     id: saveButton
                     objectName: "saveButton"
-                    text: "Save settings"
+                    text: "Save Settings"
                     icon.name: "document-save"
                     highlighted: view.unsavedChanges
+                    enabled: view.unsavedChanges && view.validationText === ""
                     onClicked: view.save()
                 }
             }

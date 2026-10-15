@@ -36,8 +36,11 @@ Kirigami.ApplicationWindow {
         tabs.currentIndex = index;
     }
 
+    // The HIG asks for showPassiveNotification for messages the user may ignore
+    // (and forbids a home made popup doing the same job): it appears at the
+    // bottom of the window, follows the theme and is dismissible.
     function toast(message, level) {
-        toastPopup.show(message, level);
+        root.showPassiveNotification(message, level === "error" ? 8000 : 4000);
     }
 
     // A job that starts without the user pressing anything (watch.mode
@@ -81,7 +84,11 @@ Kirigami.ApplicationWindow {
             anchors.fill: parent
             spacing: 0
 
-            Controls.TabBar {
+            // The KDE HIG asks for Kirigami.NavigationTabBar when an app has five
+            // or fewer destinations that are not a linear workflow - which is
+            // exactly this window, and it is also the control for immutable
+            // tabs.  It takes Kirigami.Actions and renders icon plus label.
+            Kirigami.NavigationTabBar {
                 id: tabs
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.smallSpacing
@@ -90,26 +97,28 @@ Kirigami.ApplicationWindow {
                 currentIndex: root.tabIndex
                 onCurrentIndexChanged: root.tabIndex = currentIndex
 
-                Controls.TabButton {
-                    text: "New job"
-                    icon.name: "document-new"
-                }
-                Controls.TabButton {
-                    text: backend.jobActive ? "Scanning..." : "Progress"
-                    icon.name: "view-statistics"
-                }
-                Controls.TabButton {
-                    text: "Result"
-                    icon.name: "dialog-ok-apply"
-                }
-                Controls.TabButton {
-                    text: "Settings"
-                    icon.name: "settings-configure"
-                }
-                Controls.TabButton {
-                    text: "About"
-                    icon.name: "help-about"
-                }
+                actions: [
+                    Kirigami.Action {
+                        text: "New Job"
+                        icon.name: "document-new"
+                    },
+                    Kirigami.Action {
+                        text: backend.jobActive ? "Scanning…" : "Progress"
+                        icon.name: "view-statistics"
+                    },
+                    Kirigami.Action {
+                        text: "Result"
+                        icon.name: "dialog-ok-apply"
+                    },
+                    Kirigami.Action {
+                        text: "Settings"
+                        icon.name: "settings-configure"
+                    },
+                    Kirigami.Action {
+                        text: "About"
+                        icon.name: "help-about"
+                    }
+                ]
             }
 
             Kirigami.Separator {
@@ -226,59 +235,6 @@ Kirigami.ApplicationWindow {
         id: clamavDialog
     }
 
-    Controls.Popup {
-        id: toastPopup
-        property string message: ""
-        property string level: "info"
-
-        function show(text, kind) {
-            message = text;
-            level = kind || "info";
-            open();
-            hideTimer.restart();
-        }
-
-        parent: Controls.Overlay.overlay
-        x: Math.round((parent.width - width) / 2)
-        y: parent.height - height - Kirigami.Units.gridUnit * 3
-        width: Math.min(parent.width - Kirigami.Units.gridUnit * 2, toastRow.implicitWidth + Kirigami.Units.largeSpacing * 2)
-        padding: Kirigami.Units.largeSpacing
-        closePolicy: Controls.Popup.NoAutoClose
-        background: Rectangle {
-            color: Kirigami.Theme.backgroundColor
-            border.width: 1
-            border.color: toastPopup.level === "error" ? Kirigami.Theme.negativeTextColor
-                          : toastPopup.level === "warning" ? Kirigami.Theme.neutralTextColor
-                          : Kirigami.Theme.positiveTextColor
-            radius: Kirigami.Units.smallSpacing
-        }
-
-        Timer {
-            id: hideTimer
-            interval: 4200
-            onTriggered: toastPopup.close()
-        }
-
-        contentItem: RowLayout {
-            id: toastRow
-            spacing: Kirigami.Units.smallSpacing
-
-            Kirigami.Icon {
-                source: toastPopup.level === "error" ? "dialog-error"
-                        : toastPopup.level === "warning" ? "dialog-warning"
-                        : "dialog-information"
-                implicitWidth: Kirigami.Units.iconSizes.small
-                implicitHeight: Kirigami.Units.iconSizes.small
-            }
-
-            Controls.Label {
-                text: toastPopup.message
-                wrapMode: Text.WordWrap
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-            }
-        }
-    }
-
     Connections {
         target: backend
         function onToast(level, message) {
@@ -297,12 +253,12 @@ Kirigami.ApplicationWindow {
         subtitle: "The scan stops after the file it is working on. Nothing is uploaded and no email is sent."
         customFooterActions: [
             Kirigami.Action {
-                text: "Keep running"
+                text: "Keep Running"
                 icon.name: "dialog-cancel"
                 onTriggered: cancelDialog.close()
             },
             Kirigami.Action {
-                text: "Cancel the job"
+                text: "Cancel the Job"
                 icon.name: "process-stop"
                 onTriggered: {
                     backend.cancelJob();

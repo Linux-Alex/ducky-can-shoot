@@ -140,7 +140,7 @@ limits aggressively while the storage hosts keep answering
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | Master switch for the notification stage. `--no-email` disables it for one run. |
+| `enabled` | bool | `false` | Master switch for the notification stage. Off until an SMTP server and a recipient are configured, because an installation with neither cannot send anything and the settings page would open with a warning. `--no-email` disables it for one run; `--to ADDRESS` on the command line sends anyway. |
 | `smtp_host` | string | `""` | SMTP server. Required when `enabled` is true; `DCS_SMTP_HOST` overrides it. |
 | `smtp_port` | int | `587` | Server port. `DCS_SMTP_PORT` overrides it. |
 | `security` | string | `"starttls"` | `starttls` (upgrade a plain connection), `ssl` (implicit TLS, usually port 465) or `none`. |
@@ -303,7 +303,7 @@ base_url = ""
 base_url = ""
 
 [email]
-enabled = true
+enabled = false
 smtp_host = ""
 smtp_port = 587
 security = "starttls"
@@ -348,10 +348,12 @@ autostart = false
 ```
 
 A practical starting point for a workstation that should upload the image and mail
-the link:
+the link. Email is off in a fresh configuration (a server and a recipient have to
+be configured first), so it is switched on here:
 
 ```toml
 [email]
+enabled = true
 smtp_host = "smtp.example.org"
 smtp_port = 587
 security = "starttls"
@@ -455,6 +457,9 @@ GUI:
   must be set, and `email.security` must be one of `starttls`, `ssl`, `none`.
 
 `dcs doctor` prints the resulting list and fails (exit code 1) while anything is
-unresolved. The GUI shows the same list as an inline message on the start page.
+unresolved. The GUI shows the same list as an inline message on the settings
+page, where it also disables **Save Settings** until the draft is valid again.
+A fresh configuration passes all of it: email starts out disabled, so the
+settings page of a new installation shows no warning at all.
 None of these are fatal on their own: a job still runs, minus the stage that could
 not be configured.

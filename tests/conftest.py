@@ -336,6 +336,9 @@ def tmp_config(tmp_path: Path) -> Any:
     config.email.dry_run_dir = str(tmp_path / "outbox")
     config.email.smtp_host = "smtp.example.test"
     config.email.from_addr = "dcs@example.test"
+    # email is off in a fresh configuration and the tests that use this fixture
+    # are about the stages running, so it is turned on explicitly here
+    config.email.enabled = True
     config.email.to_addrs = ["ops@example.test"]
     config.email.attach_report = False
     config.upload.enabled = False

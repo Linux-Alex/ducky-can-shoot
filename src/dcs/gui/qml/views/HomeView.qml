@@ -110,14 +110,14 @@ Controls.ScrollView {
                     }
 
                     Controls.Button {
-                        text: "Select it"
+                        text: "Select It"
                         icon.name: "go-next"
                         onClicked: backend.acceptPendingDevice()
                     }
 
                     Controls.Button {
                         objectName: "scanDeviceButton"
-                        text: "Scan it now"
+                        text: "Scan It Now"
                         icon.name: "media-playback-start"
                         highlighted: true
                         enabled: backend.state !== "running"
@@ -153,7 +153,7 @@ Controls.ScrollView {
                     }
 
                     Controls.Button {
-                        text: "Choose a folder..."
+                        text: "Choose a Folder…"
                         icon.name: "folder-open"
                         onClicked: folderDialog.open()
                     }
@@ -430,7 +430,7 @@ Controls.ScrollView {
             }
             actions: [
                 Kirigami.Action {
-                    text: "Install ClamAV..."
+                    text: "Install ClamAV…"
                     icon.name: "install"
                     onTriggered: view.installRequested()
                 },
@@ -478,7 +478,7 @@ Controls.ScrollView {
             }
 
             Controls.Button {
-                text: "Start the job"
+                text: "Start the Job"
                 icon.name: "media-playback-start"
                 highlighted: true
                 enabled: backend.sourcePath !== "" && backend.state !== "running"
@@ -527,7 +527,7 @@ Controls.ScrollView {
                 onTriggered: confirmDialog.close()
             },
             Kirigami.Action {
-                text: "Upload and email"
+                text: "Upload and Email"
                 icon.name: "cloud-upload"
                 onTriggered: {
                     confirmDialog.close();

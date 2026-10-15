@@ -269,7 +269,7 @@ Controls.ScrollView {
                     rowSpacing: Kirigami.Units.smallSpacing
 
                     Controls.Button {
-                        text: "Open report"
+                        text: "Open Report"
                         icon.name: "text-html"
                         enabled: !!(view.summary && view.summary.reports && view.summary.reports.html !== "")
                         onClicked: backend.openUrl("file://" + view.summary.reports.html)
@@ -284,14 +284,14 @@ Controls.ScrollView {
                     }
 
                     Controls.Button {
-                        text: "Open report folder"
+                        text: "Open Report Folder"
                         icon.name: "folder-open"
                         enabled: !!(view.summary && view.summary.reports && view.summary.reports.html !== "")
                         onClicked: backend.openPath(view.summary.reports.html)
                     }
 
                     Controls.Button {
-                        text: "Open archive folder"
+                        text: "Open Archive Folder"
                         icon.name: "folder-open"
                         enabled: !!(view.summary && view.summary.archive && view.summary.archive.primaryPath !== "")
                         onClicked: backend.openPath(view.summary.archive.primaryPath)
@@ -498,7 +498,7 @@ Controls.ScrollView {
 
                 Controls.Button {
                     Layout.alignment: Qt.AlignRight
-                    text: "Run another job"
+                    text: "Run Another Job"
                     icon.name: "document-new"
                     onClicked: view.runAgain()
                 }

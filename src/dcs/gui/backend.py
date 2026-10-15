@@ -8,6 +8,8 @@ files stay declarative and contain no logic worth testing.
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import os
 import threading
 from dataclasses import fields, replace
@@ -15,6 +17,7 @@ from typing import Any
 
 from PyQt6.QtCore import (
     QObject,
+    Qt,
     QThread,
     QTimer,
     QUrl,
@@ -29,6 +32,7 @@ from dcs.core.config import (
     WATCH_MODES,
     AppConfig,
     EmailConfig,
+    default_config_path,
     load_config,
     write_default_config,
 )
@@ -461,16 +465,39 @@ class Backend(QObject):
             self._engine_status = []
         self.settingsChanged.emit()
 
+    @pyqtSlot("QVariantMap", result=str)
+    def validateDraft(self, values: dict[str, Any]) -> str:
+        """What would be wrong if this draft were saved, as one message.
+
+        The settings page edits a draft that only reaches the config file on
+        Save, so the page asks here instead of validating the stored config -
+        otherwise the message would describe values the user is not looking at.
+        """
+        try:
+            candidate = copy.deepcopy(self.config)
+            candidate.merge(values or {})
+            problems = candidate.validation_problems()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("cannot validate the settings draft: %s", exc)
+            return ""
+        return "\n".join(f"• {problem}" for problem in problems)
+
     @pyqtSlot("QVariantMap")
     def saveSettings(self, values: dict[str, Any]) -> None:
         """Apply the settings page to the config object and persist it."""
         self.config.merge(values)
+        path = self.config.source_path or str(default_config_path())
         try:
             path = self.config.save()
         except OSError as exc:
             self._save_ok = False
+            # HIG: an error says what happened *and* what to do about it
             self._save_message = f"Could not save: {exc}"
-            self.toast.emit("error", f"Could not save the settings: {exc}")
+            self.toast.emit(
+                "error",
+                f"Could not save the settings: {exc}. Check that the folder holding "
+                f"{path} can be written to.",
+            )
         else:
             self._save_ok = True
             self._save_message = f"Saved to {path}"
@@ -638,7 +665,11 @@ class Backend(QObject):
         self.deviceInserted.emit(self._pending_device)
         if mode == "notify":
             self.toast.emit("info", f"USB medium plugged in: {device_summary(payload)}")
-            self._notify_desktop(payload)
+            # HIG: no system notification while the window is in the foreground,
+            # where it can appear away from where the user is looking; the banner
+            # and the passive notification carry the message there instead.
+            if not self._window_is_active():
+                self._notify_desktop(payload)
             return
         if mode == "open":
             self.acceptPendingDevice()
@@ -646,6 +677,14 @@ class Backend(QObject):
         if mode == "open_run":
             self.toast.emit("info", f"Starting on {device_summary(payload)}")
             self.runPendingDevice()
+
+    @staticmethod
+    def _window_is_active() -> bool:
+        """True while this application is the active one on screen."""
+        application = QGuiApplication.instance()
+        if application is None:  # pragma: no cover - headless tests
+            return False
+        return application.applicationState() == Qt.ApplicationState.ApplicationActive
 
     def _notify_desktop(self, payload: dict[str, Any]) -> None:
         """Show a notification with an Open button; the answer opens the window.
@@ -746,6 +785,23 @@ class Backend(QObject):
         self._busy = state == RUNNING
         self.stateChanged.emit()
         self.busyChanged.emit()
+        if state != RUNNING:
+            # the task manager badge shows the progress of a running job only
+            self._set_badge(0)
+
+    @staticmethod
+    def _set_badge(value: int) -> None:
+        """Show (or clear) the completion percentage on the task manager icon.
+
+        The HIG asks for this for a long job the user started: Plasma draws the
+        number as a progress bar on the app's icon in the task manager, which is
+        where a user looks when the window is behind something else.
+        """
+        application = QGuiApplication.instance()
+        if application is None:  # pragma: no cover - headless tests
+            return
+        with contextlib.suppress(AttributeError, TypeError):  # pragma: no cover - old Qt
+            application.setBadgeNumber(int(value))
 
     @pyqtSlot(object)
     def _on_progress(self, payload: Any) -> None:
@@ -763,6 +819,7 @@ class Backend(QObject):
                     break
             self._overall = (index + float(payload.get("percent") or 0.0)) / len(STAGE_ORDER)
             self.stateChanged.emit()
+            self._set_badge(round(self._overall * 100))
 
     @pyqtSlot(str, str)
     def _on_worker_log(self, level: str, message: str) -> None:
