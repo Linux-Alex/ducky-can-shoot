@@ -8,6 +8,7 @@ of the autouse fixture), so nothing is written into the developer's home.
 from __future__ import annotations
 
 import json
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -616,6 +617,8 @@ class FakeDesktopNotifier:
         FakeDesktopNotifier.last = self
 
     def available(self) -> bool:
+        # the real factory tries the D-Bus route first, so a fake has to look
+        # available for the watcher to pick it
         return True
 
     def notify(self, title: str, body: str = "", **kwargs: Any) -> str:
@@ -633,7 +636,11 @@ def watch_harness(monkeypatch: pytest.MonkeyPatch) -> Any:
     state = {"gui_running": False}
 
     monkeypatch.setattr("dcs.core.watch.DeviceWatcher", FakeWatchLoop)
-    monkeypatch.setattr("dcs.core.notify.desktop.DesktopNotifier", FakeDesktopNotifier)
+    # the watcher asks the factory for the best notifier: replace the factory
+    # itself, so neither gdbus nor notify-send can send a real notification
+    monkeypatch.setattr(
+        "dcs.core.notify.desktop.build_notifier", lambda **kwargs: FakeDesktopNotifier(**kwargs)
+    )
     monkeypatch.setattr("dcs.core.session.gui_running", lambda: state["gui_running"])
     monkeypatch.setattr(
         dcs.cli, "launch_gui", lambda node, autorun=False: launched.append((node, autorun)) or True
@@ -707,6 +714,12 @@ def test_watch_notify_offers_to_open_the_interface(
 
     assert code == 0
     assert "new medium: HOLIDAY" in captured.out
+    # the notification waits for the user, so it runs on its own thread: give it
+    # a moment to get there
+    deadline = time.time() + 5
+    while time.time() < deadline and not FakeDesktopNotifier.calls:
+        time.sleep(0.02)
+
     assert FakeDesktopNotifier.calls, "a notification was shown"
     assert "HOLIDAY" in FakeDesktopNotifier.calls[0][0]
     assert watch_harness["launched"] == [("/dev/sdb1", False)]

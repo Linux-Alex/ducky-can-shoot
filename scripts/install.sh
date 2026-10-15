@@ -113,11 +113,14 @@ MENU
         *) WATCH_MODE="off" ;;
     esac
 fi
-WATCH_MODE="${WATCH_MODE:-off}"
-
-WATCH_SUMMARY="off"
-
-if [ "$WATCH_MODE" != "off" ]; then
+if [ -z "$WATCH_MODE" ]; then
+    # No flag and no answer (a script, a package build, a pipe): leave whatever
+    # the user configured alone.  Reinstalling must never silently turn the
+    # watcher off.
+    say "keeping the USB watcher settings as they are"
+    WATCH_SUMMARY="unchanged"
+    "$BINDIR/dcs" watch --start >/dev/null 2>&1 || true
+elif [ "$WATCH_MODE" != "off" ]; then
     say "enabling the USB watcher (mode: $WATCH_MODE)"
     "$BINDIR/dcs" config set watch.mode "$WATCH_MODE" >/dev/null
     "$BINDIR/dcs" config set watch.autostart true >/dev/null
@@ -130,9 +133,11 @@ from dcs.core import autostart
 
 print("autostart entry:", autostart.enable(os.environ["DCS_EXEC"]))
 PY
-    WATCH_SUMMARY="$WATCH_MODE (starts with your session)"
+    # and start it now, so the mode works before the next login too
+    "$BINDIR/dcs" watch --start >/dev/null 2>&1 || true
+    WATCH_SUMMARY="$WATCH_MODE (running now, and with your session)"
 else
-    say "the USB watcher stays off"
+    say "turning the USB watcher off"
     "$BINDIR/dcs" config set watch.mode off >/dev/null 2>&1 || true
     "$BINDIR/dcs" config set watch.autostart false >/dev/null 2>&1 || true
     DCS_STATE=off "$VENV/bin/python" - <<'PY' 2>/dev/null || true

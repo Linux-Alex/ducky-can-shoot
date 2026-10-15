@@ -19,6 +19,8 @@ import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
+from typing import Any
 
 from dcs.core.log import get_logger
 from dcs.version import APP_ID, APP_NAME
@@ -110,10 +112,37 @@ def notify(
     timeout_ms: int = 20000,
     urgency: str = "normal",
 ) -> str:
-    """Show one notification with the default notifier."""
-    return DesktopNotifier(icon=icon, timeout_ms=timeout_ms).notify(
-        title, body, actions=actions, urgency=urgency
+    """Show one notification with the best notifier this machine has."""
+    return build_notifier(icon=icon, timeout_ms=timeout_ms, urgency=urgency).notify(
+        title, body, actions=actions
     )
 
 
-__all__ = ["ACTION_OPEN", "NOTIFY_BINARY", "DesktopNotifier", "notify"]
+def build_notifier(**kwargs: Any) -> Any:
+    """The notifier to use, D-Bus first.
+
+    `notify-send` sends a notification without its buttons on systems where it
+    believes the server cannot show them - Plasma 6.6 answers exactly that, in
+    spite of advertising the capability - and a notification whose button is
+    missing is useless for "plug a medium in and click Open".  Talking to the
+    notification service directly keeps the button; notify-send stays as the
+    fallback for a machine without gdbus.
+    """
+    from dcs.core.notify.dbus import DbusNotifier
+
+    for candidate in (DbusNotifier, DesktopNotifier):
+        known = {field_info.name for field_info in dataclass_fields(candidate)}
+        instance = candidate(**{key: value for key, value in kwargs.items() if key in known})
+        if instance.available():
+            log.debug("notifying through %s", candidate.__name__)
+            return instance
+    return DesktopNotifier()  # nothing is available; notify() reports that
+
+
+__all__ = [
+    "ACTION_OPEN",
+    "NOTIFY_BINARY",
+    "DesktopNotifier",
+    "build_notifier",
+    "notify",
+]

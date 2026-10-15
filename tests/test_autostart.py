@@ -79,12 +79,41 @@ def test_the_default_command_is_a_launcher_or_this_interpreter() -> None:
 
 
 def test_a_source_checkout_starts_the_watcher_through_the_interpreter(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(autostart.shutil, "which", lambda name: None)
+    """Without a launcher the entry has to help the interpreter find the package.
+
+    DCS run from a checkout is not in site-packages, so 'python -m dcs' would die
+    with ModuleNotFoundError before the watcher ever looked at a medium.
+    """
+    monkeypatch.setattr(autostart.shutil, "which", lambda name, path=None: None)
+    monkeypatch.setenv("HOME", str(tmp_path))  # and no ~/.local/bin/dcs either
+
     line = autostart.default_exec()
+
     assert line.endswith(" -m dcs")
+    assert line.startswith("env PYTHONPATH="), "the checkout is put on the path"
     assert autostart.default_exec() in autostart.desktop_entry()
+
+
+def test_the_launcher_in_the_home_directory_is_found_without_a_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """~/.local/bin is not always on the PATH of whatever writes the entry."""
+    launcher = tmp_path / ".local" / "bin" / "dcs"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    def which(name: str, path: str | None = None) -> str | None:
+        if path is None:
+            return None  # not on the PATH of whatever wrote the entry
+        candidate = Path(path) / name
+        return str(candidate) if candidate.is_file() else None
+
+    monkeypatch.setattr(autostart.shutil, "which", which)
+
+    assert autostart.default_exec() == str(launcher)
 
 
 # ---------------------------------------------------------------------------

@@ -994,9 +994,6 @@ def test_a_plugged_medium_is_offered_on_the_new_job_page(
     notifications: list[str] = []
 
     class FakeNotifier:
-        def __init__(self, **kwargs: Any) -> None:
-            pass
-
         def available(self) -> bool:
             return True
 
@@ -1004,7 +1001,7 @@ def test_a_plugged_medium_is_offered_on_the_new_job_page(
             notifications.append(title)
             return ""
 
-    monkeypatch.setattr(backend_module, "DesktopNotifier", FakeNotifier)
+    monkeypatch.setattr(backend_module, "build_notifier", lambda **kwargs: FakeNotifier())
     monkeypatch.setattr(backend, "openDevice", lambda node, autorun=False: True)
 
     backend.config.watch.mode = "notify"
@@ -1178,9 +1175,6 @@ def test_a_backgrounded_window_sends_a_system_notification(
     sent: list[str] = []
 
     class FakeNotifier:
-        def __init__(self, **kwargs: Any) -> None:
-            pass
-
         def available(self) -> bool:
             return True
 
@@ -1188,7 +1182,7 @@ def test_a_backgrounded_window_sends_a_system_notification(
             sent.append(title)
             return ""
 
-    monkeypatch.setattr(backend_module, "DesktopNotifier", FakeNotifier)
+    monkeypatch.setattr(backend_module, "build_notifier", lambda **kwargs: FakeNotifier())
     monkeypatch.setattr(backend, "_window_is_active", staticmethod(lambda: False))
     monkeypatch.setattr(backend, "openDevice", lambda node, autorun=False: True)
     backend.config.watch.mode = "notify"

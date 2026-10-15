@@ -773,10 +773,45 @@ Item {
                                 objectName: "watchHelpButton"
                                 toolTipText: "With this on, " + backend.autostartPath
                                     + " runs a small background command with your desktop session "
-                                    + "and watches for new media. It only ever looks at the list of "
-                                    + "block devices: no file is read until a scan is agreed to. "
-                                    + "While this window is open it does the watching itself, so a "
-                                    + "medium is never reported twice."
+                                    + "and watches for new media. Enabling a mode starts it right "
+                                    + "away as well, and closing this window leaves it running. It "
+                                    + "only ever looks at the list of block devices: no file is "
+                                    + "read until a scan is agreed to. While this window is open "
+                                    + "it does the watching itself, so a medium is never reported "
+                                    + "twice. What it does is logged in " + backend.watchLogPath + "."
+                            }
+                        }
+
+                        // The watcher only helps while it is actually running, so
+                        // the page says whether it is and offers to start it
+                        // now - the autostart entry only takes effect at the
+                        // next login.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                opacity: 0.75
+                                text: "Background watcher: " + backend.watchService
+                            }
+
+                            Controls.Button {
+                                objectName: "startWatcherButton"
+                                text: "Start Now"
+                                icon.name: "media-playback-start"
+                                visible: view.watchMode !== "off"
+                                         && backend.watchService === "not running"
+                                onClicked: backend.startWatchService()
+                            }
+
+                            Controls.Button {
+                                objectName: "stopWatcherButton"
+                                text: "Stop"
+                                icon.name: "process-stop"
+                                visible: backend.watchService !== "not running"
+                                onClicked: backend.stopWatchService()
                             }
                         }
 

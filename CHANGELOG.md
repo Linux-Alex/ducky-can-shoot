@@ -120,6 +120,10 @@ change between minor releases; each such change is listed below.
 - `dcs install-clamav [--dry-run] [--terminal] [--yes] [--json]`, the same plan
   from the command line, exit code 0 on success and 2 on failure.
 
+
+- `dcs watch --start`, `--stop` and `--test`, plus the watcher pid and log in
+  `dcs watch --status`.
+
 ### Fixed
 
 - **Uploads larger than 1 MiB were truncated.** DCS wrapped the file in a
@@ -197,6 +201,35 @@ change between minor releases; each such change is listed below.
   ruff-action 4, upload-artifact 7, download-artifact 8), which also clears the
   Node 20 deprecation warning, and the core matrix now covers Python 3.14 as
   well as 3.11, 3.12 and 3.13.
+
+
+- **The notification now has its button, and the watcher actually runs.** Two
+  things stopped "plug a medium in while DCS is closed" from working:
+
+  - **Nothing was listening.** The watcher is started by an autostart entry, and
+    an entry written *after* a login only takes effect at the next one, so between
+    the two there was no process at all. Enabling a mode now starts the watcher
+    immediately (`dcs watch --start`, called by the settings page and by the
+    installer), closing the window hands the watching over to it instead of
+    stopping, and the settings page shows whether it is running next to a
+    **Start Now** button. A pid file makes starting it twice harmless, and
+    everything it does is written to `~/.local/state/dcs/watch.log`.
+  - **The notification arrived without its Open button.** `notify-send` refuses
+    to send actions on systems where it believes the server cannot show them -
+    Plasma 6.6 answers "Actions are not supported by this notifications server",
+    in spite of advertising the `actions` capability - so DCS talks to
+    `org.freedesktop.Notifications` directly: one `Notify` call with the button,
+    then a signal monitor for `ActionInvoked`. Notifications are also marked
+    resident so the button does not disappear while the user reads the mail
+    first, the button is withdrawn again when nobody presses it, and the wait runs
+    on its own thread so a second medium plugged in meanwhile is still noticed.
+    `notify-send` stays as the fallback for a machine without `gdbus`, and
+    `dcs watch --test` says which of the two is in use.
+- **Reinstalling no longer turns the USB watcher off.** `scripts/install.sh`
+  without an answer to its question (a pipe, a script, a package build) fell
+  through to "off" and quietly disabled the mode, removed the autostart entry and
+  left the user wondering why the notifications stopped. It now leaves the
+  configured mode alone in that case, and `--watch=MODE` still says what to do.
 
 ## [0.1.0] - 2026-01
 

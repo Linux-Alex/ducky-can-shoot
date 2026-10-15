@@ -27,7 +27,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QClipboard, QDesktopServices, QGuiApplication
 
-from dcs.core import autostart
+from dcs.core import autostart, service
 from dcs.core.config import (
     WATCH_MODES,
     AppConfig,
@@ -46,7 +46,7 @@ from dcs.core.events import STAGE_ORDER
 from dcs.core.installer import Installer, build_plan, manual_instructions
 from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import get_logger, log_ring
-from dcs.core.notify.desktop import ACTION_OPEN, DesktopNotifier
+from dcs.core.notify.desktop import ACTION_OPEN, build_notifier
 from dcs.core.pipeline import JobRequest
 from dcs.core.scanner import Scanner
 from dcs.core.upload import provider_catalog
@@ -169,10 +169,11 @@ class Backend(QObject):
         log_ring().add_listener(self._on_log_record)
         self.refreshDevices()
         self.refreshEngineStatus()
+        self._watch_state = ""
         if poll_devices:
             self._poll = QTimer(self)
             self._poll.setInterval(3000)
-            self._poll.timeout.connect(self.refreshDevices)
+            self._poll.timeout.connect(self._refresh_watch_state)
             self._poll.start()
 
     # ------------------------------------------------------------------
@@ -508,7 +509,12 @@ class Backend(QObject):
         self.settingsSaved.emit(self._save_ok, self._save_message)
 
     def _apply_watch_settings(self) -> None:
-        """Follow the USB settings at once: the timer and the autostart entry."""
+        """Follow the USB settings at once: timer, autostart entry, watcher process.
+
+        Enabling a mode also starts the background watcher *now*: the autostart
+        entry only takes effect at the next login, and until then nothing would
+        be listening while the window is closed.
+        """
         self.watcher.apply_config(self.config)
         wanted = bool(self.config.watch.autostart) and self.config.watch.mode != "off"
         if autostart.sync(wanted):
@@ -516,6 +522,13 @@ class Backend(QObject):
                 "autostart entry %s",
                 "installed" if autostart.is_enabled() else "removed",
             )
+        if self.config.watch.mode == "off":
+            log.debug("watch mode is off; the background watcher keeps running until stopped")
+        else:
+            started, message = service.start()
+            log.info("background watcher: %s", message)
+            if started:
+                self.toast.emit("info", f"The background watcher is {message}")
         self.watchStateChanged.emit()
 
     @pyqtSlot()
@@ -570,6 +583,30 @@ class Backend(QObject):
     def autostartPath(self) -> str:
         return str(autostart.autostart_path())
 
+    @pyqtProperty(str, notify=watchStateChanged)
+    def watchService(self) -> str:
+        """What the background watcher is doing right now."""
+        pid = service.watcher_pid()
+        return f"running (pid {pid})" if pid else "not running"
+
+    @pyqtProperty(str, constant=True)
+    def watchLogPath(self) -> str:
+        return str(service.log_path())
+
+    @pyqtSlot(result=bool)
+    def startWatchService(self) -> bool:
+        """Start the background watcher now, without waiting for a login."""
+        started, message = service.start()
+        self.watchStateChanged.emit()
+        self.toast.emit("info", ("Started: " if started else "Already running: ") + message)
+        return started
+
+    @pyqtSlot()
+    def stopWatchService(self) -> None:
+        stopped, message = service.stop()
+        self.watchStateChanged.emit()
+        self.toast.emit("info" if stopped else "warning", message)
+
     @pyqtSlot()
     def acceptPendingDevice(self) -> None:
         """Select the medium that was plugged in (mounting it if needed)."""
@@ -596,6 +633,14 @@ class Backend(QObject):
     def dismissPendingDevice(self) -> None:
         self._pending_device = {}
         self.pendingDeviceChanged.emit()
+
+    def _refresh_watch_state(self) -> None:
+        """Poll devices, and tell the interface when the watcher comes or goes."""
+        state = self.watchService
+        if state != self._watch_state:
+            self._watch_state = state
+            self.watchStateChanged.emit()
+        self.refreshDevices()
 
     @pyqtSlot(str, result=bool)
     def openDevice(self, node: str, autorun: bool = False) -> bool:
@@ -692,7 +737,7 @@ class Backend(QObject):
         notify-send waits for the user, so it runs on a worker thread: the
         window must stay responsive while the notification is on screen.
         """
-        notifier = DesktopNotifier(timeout_ms=self.config.watch.notify_timeout_ms)
+        notifier = build_notifier(timeout_ms=self.config.watch.notify_timeout_ms)
         title = f"USB medium plugged in: {payload.get('displayName') or payload.get('node')}"
         body = (
             f"{device_summary(payload)}. Open {APP_NAME} to scan it, archive it and mail "

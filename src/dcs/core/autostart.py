@@ -38,14 +38,38 @@ def autostart_path() -> Path:
 def default_exec() -> str:
     """How the entry starts the watcher.
 
-    The installed `dcs` launcher when there is one (that is the case for every
-    installation scripts/install.sh makes), otherwise this very interpreter with
-    `-m dcs`, which is what a source checkout needs.
+    The installed `dcs` launcher when there is one - which is the case for every
+    installation scripts/install.sh makes, and also in ~/.local/bin even when
+    that directory is not on the PATH of whatever wrote the entry.  Otherwise
+    this very interpreter with `-m dcs`, plus the directory that holds the
+    package when DCS is being run from a source checkout: without it the entry
+    would start an interpreter that cannot import the module at all, and the
+    watcher would die before it ever looked at a medium.
     """
-    found = shutil.which("dcs")
+    found = shutil.which("dcs") or shutil.which(
+        "dcs", path=os.path.join(os.path.expanduser("~"), ".local", "bin")
+    )
     if found:
         return found
-    return f"{sys.executable} -m dcs"
+
+    command = f"{sys.executable} -m dcs"
+    source_root = _source_root()
+    if source_root:
+        return f"env PYTHONPATH={source_root} {command}"
+    return command
+
+
+def _source_root() -> str:
+    """The directory to put on PYTHONPATH so 'python -m dcs' finds the package.
+
+    Empty when the package lives in site-packages, where it needs no help.
+    """
+    from dcs.version import __file__ as version_file
+
+    package_dir = Path(version_file).resolve().parent
+    if "site-packages" in str(package_dir) or "dist-packages" in str(package_dir):
+        return ""
+    return str(package_dir.parent)
 
 
 def desktop_entry(exec_line: str | None = None) -> str:

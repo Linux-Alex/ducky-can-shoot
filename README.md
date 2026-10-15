@@ -226,9 +226,13 @@ nevertheless react on its own, and you choose how far that goes: the setting is
 ![A medium that was plugged in while the watcher runs: the banner on the New job page offers to scan it](docs/images/new-medium.png)
 
 While a window is open it does the watching itself; to react while DCS is closed,
-tick **Start the watcher with my session**, which writes one autostart entry
-(`~/.config/autostart/org.kde.dcs.watch.desktop`). The installer offers the same
-choice at the end, and "do nothing" is the default answer:
+tick **Start the watcher with my session**. That writes one autostart entry
+(`~/.config/autostart/org.kde.dcs.watch.desktop`) *and* starts the watcher right
+away - the entry alone only takes effect at the next login, which is why the
+settings page shows the state next to a **Start Now** button. In notification
+mode the button in the notification is what opens DCS, and `dcs watch --test`
+sends one to check that it works. The installer offers the same choice at the end,
+and "do nothing" is the default answer:
 
 ```bash
 ./scripts/install.sh                 # asks, default: do nothing
@@ -238,10 +242,16 @@ choice at the end, and "do nothing" is the default answer:
 From a terminal:
 
 ```bash
-dcs watch --status                   # what is configured, and is a window open?
-dcs watch                            # listen with the configured mode
+dcs watch --status                   # mode, autostart entry, watcher, log file
+dcs watch --start                    # make sure something is listening right now
+dcs watch --test                     # does the notification's button work here?
 dcs config set watch.mode open_run   # not for you? "off" is one command away
 ```
+
+Notifications are sent over D-Bus rather than through `notify-send`, which drops
+the action buttons on systems where it thinks the server cannot show them
+(Plasma 6.6 is such a system) - and a notification without its button defeats the
+point of notification mode.
 
 The watcher polls `lsblk` every three seconds. It never mounts, never reads a
 file, never scans and never needs root: it looks at the list of block devices and

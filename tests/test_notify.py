@@ -21,7 +21,8 @@ from dcs.core.archiver import ArchivePart, ArchiveResult
 from dcs.core.config import AppConfig, EmailConfig
 from dcs.core.events import Finding, ScanStats, Severity, Verdict
 from dcs.core.notify import desktop as desktop_notify
-from dcs.core.notify.desktop import DesktopNotifier
+from dcs.core.notify.dbus import DbusNotifier
+from dcs.core.notify.desktop import DesktopNotifier, build_notifier
 from dcs.core.notify.smtp import Notifier
 from dcs.core.notify.templates import (
     SUBJECT_HEADS,
@@ -866,6 +867,158 @@ def test_a_missing_notification_server_is_survived() -> None:
 def test_a_notification_nobody_answers_is_survived() -> None:
     runner = FakeNotifySend(raises=subprocess.TimeoutExpired("notify-send", 20))
     assert notifier_with(runner).notify("title", "body") == ""
+
+
+# ---------------------------------------------------------------------------
+# the D-Bus route: the one that keeps the buttons
+# ---------------------------------------------------------------------------
+
+
+class FakeMonitor:
+    """A stand-in for 'gdbus monitor' that hands out prepared lines."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = list(lines)
+        self.stdout = self
+        self.terminated = False
+        self._closed = False
+
+    def readline(self) -> str:
+        if self._lines:
+            return self._lines.pop(0)
+        self._closed = True
+        return ""
+
+    def poll(self) -> int | None:
+        return 0 if self._closed else None
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+    def fileno(self) -> int:
+        return 0
+
+
+def dbus_notifier(
+    call_stdout: str = "(uint32 42,)",
+    monitor_lines: list[str] | None = None,
+    **kwargs: Any,
+) -> tuple[DbusNotifier, FakeNotifySend, FakeMonitor]:
+    monitor = FakeMonitor(monitor_lines if monitor_lines is not None else [])
+    runner = FakeNotifySend(stdout=call_stdout)
+    notifier = DbusNotifier(runner=runner, opener=lambda *a, **k: monitor, timeout_ms=1000, **kwargs)
+    notifier.binary = "/usr/bin/gdbus"  # skip the which() lookup
+    return notifier, runner, monitor
+
+
+def test_the_dbus_call_carries_the_button() -> None:
+    notifier, runner, _monitor = dbus_notifier()
+
+    notifier.notify("USB medium plugged in: STICK", "STICK (14.9 GiB)")
+
+    argv = runner.calls[0]
+    assert argv[:2] == ["/usr/bin/gdbus", "call"]
+    assert "org.freedesktop.Notifications.Notify" in argv
+    assert "['open', 'Open Ducky Can Shoot']" in argv, "the action pair reaches the server"
+    assert any("resident" in part for part in argv), "so the button stays on screen"
+    assert any("urgency" in part for part in argv)
+    assert argv[-1] == "1000", "the notification lifetime is the configured one"
+    assert "USB medium plugged in: STICK" in argv
+
+
+def test_the_action_the_user_pressed_comes_back() -> None:
+    notifier, _runner, monitor = dbus_notifier(
+        call_stdout="(uint32 42,)",
+        monitor_lines=[
+            "Monitoring signals on object /org/freedesktop/Notifications",
+            "The name org.freedesktop.Notifications is owned by :1.28",
+            "/org/freedesktop/Notifications: org.freedesktop.Notifications.ActionInvoked (uint32 42, 'open')",
+        ],
+    )
+
+    assert notifier.notify("title", "body") == "open"
+    assert monitor.terminated is True, "the monitor is not left behind"
+
+
+def test_a_notification_that_was_closed_reports_nothing() -> None:
+    notifier, _runner, _monitor = dbus_notifier(
+        monitor_lines=[
+            "/org/freedesktop/Notifications: org.freedesktop.Notifications.NotificationClosed (uint32 42, 2)"
+        ]
+    )
+
+    assert notifier.notify("title", "body") == ""
+
+
+def test_an_action_for_another_notification_is_ignored() -> None:
+    notifier, _runner, _monitor = dbus_notifier(
+        call_stdout="(uint32 42,)",
+        monitor_lines=[
+            "ActionInvoked (uint32 7, 'open')",
+            "NotificationClosed (uint32 42, 1)",
+        ],
+    )
+
+    assert notifier.notify("title", "body") == ""
+
+
+def test_a_missing_gdbus_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("dcs.core.notify.dbus.shutil.which", lambda name: None)
+
+    assert DbusNotifier().available() is False
+
+
+def test_a_refused_dbus_call_is_not_an_error() -> None:
+    monitor = FakeMonitor([])
+    runner = FakeNotifySend(returncode=1, stderr="no such service")
+    notifier = DbusNotifier(runner=runner, opener=lambda *a, **k: monitor, timeout_ms=100)
+    notifier.binary = "/usr/bin/gdbus"
+
+    assert notifier.notify("title", "body") == ""
+
+
+def test_the_factory_returns_something_that_can_notify() -> None:
+    notifier = build_notifier(timeout_ms=5000)
+
+    assert isinstance(notifier, (DbusNotifier, DesktopNotifier))
+    assert notifier.available() is True, "one of the two routes works on a desktop"
+
+
+def test_the_cli_test_command_reports_the_button(capsys: Any) -> None:
+    from dcs import cli
+
+    class ButtonNotifier:
+        def available(self) -> bool:
+            return True
+
+        def notify(self, title: str, body: str = "", **kwargs: Any) -> str:
+            return "open"
+
+    code = cli._watch_test_notification(ButtonNotifier())
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "the button works" in captured.out
+
+
+def test_the_cli_test_command_warns_when_the_button_is_missing(capsys: Any) -> None:
+    from dcs import cli
+
+    class PlainNotifier:
+        def available(self) -> bool:
+            return True
+
+        def notify(self, title: str, body: str = "", **kwargs: Any) -> str:
+            return ""
+
+    code = cli._watch_test_notification(PlainNotifier())
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert "no button press" in captured.out
 
 
 def test_availability_follows_notify_send(monkeypatch: pytest.MonkeyPatch) -> None:

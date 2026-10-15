@@ -11,7 +11,7 @@ from PyQt6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtQml import QQmlApplicationEngine, QQmlContext
 
-from dcs.core import autostart, session
+from dcs.core import autostart, service, session
 from dcs.core.config import AppConfig, load_config
 from dcs.core.log import configure_logging, get_logger
 from dcs.gui.backend import Backend
@@ -184,7 +184,20 @@ def run_gui(
     # Tell the watcher (the autostart process) that the window is here: while
     # this marker is alive 'dcs watch' stays quiet instead of reacting twice.
     session.claim()
-    app.aboutToQuit.connect(session.release)
+
+    def leave_session() -> None:
+        """Hand the watching over to the background process, then let go.
+
+        Closing the window must not stop the listener when a mode is enabled:
+        the marker is dropped first, so the watcher that is already running (or
+        the one started here) reacts from that moment on.
+        """
+        session.release()
+        if backend.config.watch.mode != "off":
+            started, message = service.start()
+            log.info("background watcher: %s", message if started else f"already there ({message})")
+
+    app.aboutToQuit.connect(leave_session)
 
     # The autostart entry is a setting like any other: put it back when the
     # configuration asks for it but the file went missing.

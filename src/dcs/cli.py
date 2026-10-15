@@ -332,29 +332,81 @@ MODE_SUMMARY: dict[str, str] = {
 
 
 def _watch_status(config: Any, mode: str) -> int:
-    from dcs.core import autostart, session
+    from dcs.core import autostart, service, session
 
     running = session.gui_pid()
+    watcher = service.watcher_pid()
+    interface_state = f"running (pid {running})" if running else "not running"
+    watcher_state = f"running (pid {watcher})" if watcher else "not running"
     print(f"mode            : {mode}")
     print(f"watch interval  : {config.watch.interval_s:g}s")
     print(f"ignore existing : {config.watch.ignore_existing}")
     print(f"autostart file  : {autostart.autostart_path()}"
           f" ({'installed' if autostart.is_enabled() else 'not installed'})")
     print(f"autostart runs  : {autostart.default_exec()} watch")
-    state = f"running (pid {running})" if running else "not running"
-    print(f"interface       : {state}")
+    print(f"interface       : {interface_state}")
+    print(f"watcher         : {watcher_state}")
+    print(f"watcher log     : {service.log_path()}")
     print(f"would do        : {MODE_SUMMARY.get(mode, mode)}")
     return EXIT_CLEAN
 
 
+def _watch_test_notification(notifier: Any) -> int:
+    """Send one notification through the real code path and wait for the answer.
+
+    Troubleshooting a watcher nobody can see is hopeless without this: it says
+    which mechanism was used and whether the button came back.
+    """
+    kind = type(notifier).__name__
+    print(f"sending a test notification through {kind}")
+    print("press the button in the notification (or wait for it to expire)")
+    choice = notifier.notify(
+        "Ducky Can Shoot: notification test",
+        "This is the notification a new medium produces. Nothing is scanned and no "
+        "medium was read; pressing the button would open the interface.",
+        actions=(("open", f"Open {APP_NAME}"),),
+    )
+    if choice == "open":
+        print("answer: the button works")
+        return EXIT_CLEAN
+    print("answer: no button press was received")
+    if kind == "DesktopNotifier":
+        print(
+            "note: notify-send is showing this notification without its buttons. "
+            "Install gdbus (glib2) so the button appears, or use watch.mode open.",
+            file=sys.stderr,
+        )
+    return EXIT_THREAT
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """Listen for media that are plugged in and react the way the config says."""
-    from dcs.core.notify.desktop import ACTION_OPEN, DesktopNotifier
+    from dcs.core import service
+    from dcs.core.notify.desktop import ACTION_OPEN, build_notifier
     from dcs.core.session import gui_running
     from dcs.core.watch import DeviceWatcher
 
+    if getattr(args, "stop", False):
+        stopped, message = service.stop()
+        print(message)
+        return EXIT_CLEAN if stopped or "no watcher" in message else EXIT_ERROR
+
+    if getattr(args, "start", False):
+        # the same thing the settings page does when the mode is enabled: make
+        # sure something is listening from now on, without waiting for a login
+        started, message = service.start()
+        print(("started: " if started else "nothing to do: ") + message)
+        return EXIT_CLEAN if started or "already" in message else EXIT_ERROR
+
     config = load_config(args.config)
     mode = (getattr(args, "mode", "") or config.watch.mode or "off").strip().lower()
+    if mode != "off" and not getattr(args, "once", False):
+        # a watcher nobody watches: keep a log of what it did
+        configure_logging(
+            level=os.environ.get("DCS_LOG_LEVEL", "INFO"),
+            logfile=str(service.log_path()),
+            quiet=True,
+        )
     if mode not in WATCH_MODES:
         print(
             f"unknown watch mode {mode!r}: use one of {', '.join(WATCH_MODES)}",
@@ -392,11 +444,15 @@ def cmd_watch(args: argparse.Namespace) -> int:
         print(f"Modes: {', '.join(WATCH_MODES)}  (see 'dcs watch --help' for what each one does)")
         return EXIT_CLEAN
 
-    notifier = DesktopNotifier(timeout_ms=config.watch.notify_timeout_ms)
+    notifier = build_notifier(timeout_ms=config.watch.notify_timeout_ms)
+
+    if getattr(args, "test", False):
+        return _watch_test_notification(notifier)
+
     if mode == "notify" and not notifier.available():
         print(
-            "note: notify-send is not installed, so no notification can be shown "
-            "(install libnotify-bin); new media are printed here instead.",
+            "note: neither gdbus nor notify-send is installed, so no notification "
+            "can be shown; new media are printed here instead.",
             file=sys.stderr,
         )
 
@@ -426,26 +482,43 @@ def cmd_watch(args: argparse.Namespace) -> int:
         else:
             print(f"new medium: {event.summary()}", flush=True)
         if mode == "notify":
-            choice = notifier.notify(
-                f"USB medium plugged in: {event.label}",
-                f"{event.summary()}. Open {APP_NAME} to scan it, archive it and email "
-                "the verdict; nothing has been read from the medium yet.",
-                actions=((ACTION_OPEN, f"Open {APP_NAME}"),),
-            )
-            if choice == ACTION_OPEN:
-                launch_gui(event.node)
+            def ask(node: str = event.node, summary: str = event.summary(), label: str = event.label) -> None:
+                # the notification waits for the user, so it must not hold up
+                # the polling loop: a second medium plugged in meanwhile is
+                # still noticed while this one is on screen
+                choice = notifier.notify(
+                    f"USB medium plugged in: {label}",
+                    f"{summary}. Open {APP_NAME} to scan it, archive it and email "
+                    "the verdict; nothing has been read from the medium yet.",
+                    actions=((ACTION_OPEN, f"Open {APP_NAME}"),),
+                )
+                if choice == ACTION_OPEN:
+                    launch_gui(node)
+
+            threading.Thread(target=ask, daemon=True, name="dcs-notify").start()
         elif mode == "open":
             launch_gui(event.node)
         elif mode == "open_run":
             launch_gui(event.node, autorun=True)
 
+    # Claim the watcher role before the loop: a second copy (the autostart entry
+    # racing a 'Start now' from the settings page) has to leave quietly instead
+    # of notifying the user twice.
+    if not service.claim():
+        print(f"another watcher is already running (pid {service.watcher_pid()})")
+        return EXIT_CLEAN
+
     print(
         f"Watching for new media (mode: {mode}, every {watcher.interval_s:g}s). "
-        "Media that are already attached are ignored. Ctrl+C stops.",
+        f"Media that are already attached are ignored. log: {service.log_path()} "
+        "Ctrl+C stops.",
         flush=True,
     )
-    with contextlib.suppress(KeyboardInterrupt):  # pragma: no cover - interactive only
-        watcher.run(react, stop=stop)
+    try:
+        with contextlib.suppress(KeyboardInterrupt):  # pragma: no cover - interactive only
+            watcher.run(react, stop=stop)
+    finally:
+        service.release()
     print("Stopped watching.", flush=True)
     return EXIT_CLEAN
 
@@ -817,6 +890,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds between two polls (default: watch.interval_s)",
     )
     watch.add_argument("--once", action="store_true", help="report the media attached now and exit")
+    watch.add_argument(
+        "--start",
+        action="store_true",
+        help="start a watcher in the background (unless one is already running) and exit",
+    )
+    watch.add_argument("--stop", action="store_true", help="stop the background watcher and exit")
+    watch.add_argument(
+        "--test",
+        action="store_true",
+        help="send one test notification and report whether its button works",
+    )
     watch.add_argument(
         "--status",
         action="store_true",

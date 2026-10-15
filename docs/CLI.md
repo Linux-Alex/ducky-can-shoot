@@ -160,7 +160,10 @@ connection, only `lsblk`.
 | `--mode off\|notify\|open\|open_run` | Override the configured mode for this run only. |
 | `--interval SECONDS` | Override `watch.interval_s`. |
 | `--once` | Print the media attached right now and exit (a snapshot, not a listener). |
-| `--status` | Print the mode, the autostart file, the interval and whether an interface is already running. |
+| `--start` | Start a watcher in the background (unless one is already running) and exit. This is what the settings page and the installer call. |
+| `--stop` | Stop the background watcher and exit. |
+| `--test` | Send one test notification and report whether its button came back. Use this when a notification arrives without a button. |
+| `--status` | Print the mode, the autostart file, the interval, and whether an interface, a watcher and the log file are there. |
 | `--json` | One JSON object per medium, for scripts. |
 
 Modes:
@@ -173,14 +176,30 @@ Modes:
 | `open_run` | Starts `dcs gui --device NODE --autorun`, which mounts the medium and runs the whole job. |
 
 While a window is open, `dcs watch` stays quiet: the interface watches for itself,
-so a medium never produces two notifications or two jobs.
+so a medium never produces two notifications or two jobs. Closing the window hands
+the watching back to the background process, which the interface starts if it is
+not running yet.
+
+`--start` is idempotent: a pid file in `$XDG_RUNTIME_DIR/ducky-can-shoot/watch.pid`
+makes a second watcher stand down, so the autostart entry and the settings page can
+both ask for one. A detached watcher writes what it does to
+`$XDG_STATE_HOME/dcs/watch.log` (`~/.local/state/dcs/watch.log`), which
+`--status` prints.
 
 ```bash
-dcs watch --status                            # mode, autostart file, running window
-dcs watch                                     # listen with the configured mode
+dcs watch --status                            # mode, autostart file, watcher, log
+dcs watch --start                             # make sure something is listening now
+dcs watch --test                              # does the notification button work?
+dcs watch                                     # listen in the foreground
 dcs watch --mode notify --interval 1          # try it out without saving anything
 dcs watch --once --json                       # what is attached right now
 ```
+
+The notification is sent over D-Bus (`org.freedesktop.Notifications`) rather than
+through `notify-send`, because `notify-send` drops the action buttons on systems
+where it believes the server cannot show them - Plasma 6.6 says exactly that - and
+a notification without its button is useless for "plug a medium in, click Open".
+`notify-send` is still the fallback on a machine without `gdbus`.
 
 Exit code: 0 normally, 2 for an unknown mode.
 

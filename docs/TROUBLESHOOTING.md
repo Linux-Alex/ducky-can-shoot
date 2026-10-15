@@ -26,6 +26,12 @@ would do        : nothing; the watcher exits immediately
 
 - **`mode` is `off`** - turn it on with `dcs config set watch.mode notify` (or in
   **Settings -> USB detection**).
+- **`watcher : not running`** - nothing is listening while DCS is closed. The
+  autostart entry only takes effect at the *next* login, so enabling a mode also
+  starts the watcher straight away; the same thing by hand is
+  `dcs watch --start`. The settings page shows the state next to
+  **Start Now**. What the watcher did is in
+  `~/.local/state/dcs/watch.log`.
 - **Nothing reacts while the interface is open** - that is on purpose: the window
   watches for itself, so a medium cannot produce two notifications or two jobs.
   The line `interface : running (pid N)` says so. Close the window and plug the
@@ -33,9 +39,16 @@ would do        : nothing; the watcher exits immediately
 - **It only reacts to media that appear *while it runs*** - a stick that was
   already attached when the watcher started is ignored
   (`watch.ignore_existing`). Unplug it, plug it back in.
-- **No notification appears** - `notify-send` comes from `libnotify-bin`:
-  `sudo apt install libnotify-bin`. Without it the medium is printed on standard
-  output of `dcs watch` instead, and the banner still appears in an open window.
+- **No notification appears** - notifications go over D-Bus, which needs
+  `gdbus` (part of GLib and present on every desktop); `notify-send` from
+  `libnotify-bin` is the fallback. Without either, the medium is printed on the
+  standard output of `dcs watch` instead, and the banner still appears in an open
+  window.
+- **The notification has no button** - `dcs watch --test` sends one through the
+  real code path and reports whether the button came back. If it says
+  "no button press was received" while a notification did appear, the fallback
+  (`notify-send`) is in use: install `gdbus` (GLib), or use
+  `watch.mode = open`, which opens the interface without asking.
 - **Nothing happens at login** - the autostart entry is a file, check that it
   exists and that its `Exec=` starts a real launcher:
   `cat ~/.config/autostart/org.kde.dcs.watch.desktop`. `dcs config set
