@@ -805,10 +805,23 @@ class FakeNotifySend:
         return subprocess.CompletedProcess(argv, self.returncode, self.stdout, self.stderr)
 
 
+class AvailableNotifier(DesktopNotifier):
+    """A notifier whose binary is present, whatever the test machine has.
+
+    The real class checks shutil.which() before doing anything, which is right
+    in production and wrong in a test: a machine without libnotify installed
+    must still be able to test the command line that would be run.
+    """
+
+    def __init__(self, runner: FakeNotifySend, **kwargs: Any) -> None:
+        super().__init__(runner=runner, binary="/usr/bin/notify-send", **kwargs)
+
+    def available(self) -> bool:
+        return True
+
+
 def notifier_with(runner: FakeNotifySend, **kwargs: Any) -> DesktopNotifier:
-    instance = DesktopNotifier(runner=runner, **kwargs)
-    instance.binary = "/usr/bin/notify-send"  # skip the which() lookup
-    return instance
+    return AvailableNotifier(runner, **kwargs)
 
 
 def test_a_notification_offers_the_open_action_and_reports_it() -> None:
