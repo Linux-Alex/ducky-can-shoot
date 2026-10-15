@@ -878,7 +878,10 @@ Item {
             id: saveBar
             objectName: "saveBar"
             Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit * 3.4
+            // Tall enough for its contents whatever the font size is: a fixed
+            // gridUnit multiple clips the buttons at a large system font.
+            Layout.preferredHeight: Math.max(Kirigami.Units.gridUnit * 3.4,
+                                             barRow.implicitHeight + Kirigami.Units.largeSpacing)
             color: Kirigami.Theme.alternateBackgroundColor
 
             Rectangle {
@@ -891,6 +894,7 @@ Item {
             }
 
             RowLayout {
+                id: barRow
                 anchors.fill: parent
                 anchors.leftMargin: Kirigami.Units.gridUnit
                 anchors.rightMargin: Kirigami.Units.gridUnit
