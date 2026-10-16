@@ -189,7 +189,11 @@ def test_the_installer_installs_every_size() -> None:
     assert "ICONROOT" in text
     assert "apps/org.kde.dcs.png" in text
     assert SIZE_VARIABLE + "x" + SIZE_VARIABLE in text
-    assert "scalable" not in text, "there is no vector version to install"
+    # no vector version is installed; an installation that still has the old one
+    # is cleaned up instead
+    installed = [line for line in text.splitlines() if line.strip().startswith("install ")]
+    assert not any("scalable" in line for line in installed)
+    assert "rm -f" in text and "scalable/apps/org.kde.dcs.svg" in text
 
 
 def test_the_installer_keeps_the_size_list_in_step_with_the_files() -> None:

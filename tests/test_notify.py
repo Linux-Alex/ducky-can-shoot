@@ -980,11 +980,21 @@ def test_a_refused_dbus_call_is_not_an_error() -> None:
     assert notifier.notify("title", "body") == ""
 
 
-def test_the_factory_returns_something_that_can_notify() -> None:
-    notifier = build_notifier(timeout_ms=5000)
+def test_the_factory_prefers_the_route_that_keeps_the_button(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-Bus first, notify-send as the fallback, decided by availability."""
+    monkeypatch.setattr(DbusNotifier, "available", lambda self: True)
+    assert isinstance(build_notifier(timeout_ms=5000), DbusNotifier)
 
-    assert isinstance(notifier, (DbusNotifier, DesktopNotifier))
-    assert notifier.available() is True, "one of the two routes works on a desktop"
+    monkeypatch.setattr(DbusNotifier, "available", lambda self: False)
+    monkeypatch.setattr(DesktopNotifier, "available", lambda self: True)
+    assert isinstance(build_notifier(timeout_ms=5000), DesktopNotifier)
+
+    # and with neither of them the caller still gets something that reports why
+    monkeypatch.setattr(DesktopNotifier, "available", lambda self: False)
+    notifier = build_notifier(timeout_ms=5000)
+    assert notifier.available() is False
 
 
 def test_the_cli_test_command_reports_the_button(capsys: Any) -> None:
