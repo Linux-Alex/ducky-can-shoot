@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-644%20passing-brightgreen" alt="644 tests passing">
+  <img src="https://img.shields.io/badge/tests-732%20passing-brightgreen" alt="732 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.1.0%20alpha-orange" alt="Status: 0.1.0 alpha">
@@ -55,11 +55,11 @@ Everything runs locally except the upload you asked for.
 
 | New job | Live run |
 | --- | --- |
-| ![Choosing a USB medium and the options for the job](docs/images/home-view.png) | ![The progress view: stages, counters, throughput and findings](docs/images/live-view.png) |
+| ![Choosing a USB medium and the options for the job](docs/images/home-view.png) | ![The progress view: the seven stages, counters and throughput during a scan](docs/images/live-view.png) |
 
 | Result: clean | Result: infected |
 | --- | --- |
-| ![A clean verdict with the share link](docs/images/result-view.png) | ![An infected verdict with the findings and no link](docs/images/result-infected.png) |
+| ![A clean verdict: no findings, the archive and the share link](docs/images/result-view.png) | ![An infected verdict with the findings and no link](docs/images/result-infected.png) |
 
 | Settings | Installing the optional ClamAV |
 | --- | --- |
@@ -68,6 +68,13 @@ Everything runs locally except the upload you asked for.
 The interface is Qt Quick with **Kirigami**, so it uses your Plasma colour scheme,
 icon theme and fonts. The screenshots were rendered with the KDE style; your
 window will look like the rest of your desktop.
+
+They are not mock-ups: `make screenshots` renders them from real pipeline runs
+over two synthetic media (one clean, one infected), with the upload host
+replaced by a stand-in so that refreshing the documentation never publishes a
+file. `scripts/make-screenshots.py` also checks the outcome before it saves an
+image: the "clean" shot is only written when the run really came out clean with
+no findings.
 
 ## Quick start
 
@@ -401,7 +408,7 @@ assistance.**
 - Large parts of the code, the tests, the documentation and the interface were
   written by AI agents (DeepSeek Harness sessions) under human direction and
   review, then verified before they were kept.
-- What "verified" means here: 556 automated tests, live upload round trips
+- What "verified" means here: 732 automated tests, live upload round trips
   against real hosts with checksum comparison, scans of a purpose-built sample
   medium with EICAR and synthetic malware shapes, and repeated runs of the
   interface in a real Plasma session. That last one is how several layout and
@@ -443,7 +450,7 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   installer.py         installing ClamAV through the system package manager
 src/dcs/gui/           PyQt6 facade, Qt models and the QML interface (Kirigami)
 src/dcs/cli.py         the dcs command
-tests/                 556 tests, hermetic: no network, no real device, fake ClamAV
+tests/                 732 tests, hermetic: no network, no real device, fake ClamAV
 docs/                  architecture, configuration, CLI, troubleshooting, threat model, roadmap
 bin/dcs                run the checkout without installing
 scripts/               install.sh, uninstall.sh

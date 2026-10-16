@@ -8,7 +8,20 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The "clean verdict" screenshot came from an infected run.** Every demo
+  medium that `scripts/make-screenshots.py` built carried the samples - EICAR, a
+  Duckyscript payload, an `autorun.inf`, a double extension, PowerShell and batch
+  scripts - so the picture captioned "a clean verdict" showed eleven findings and
+  a "Malware detected" headline. The script now builds two media, a clean one
+  holding nothing but documents and an infected one, and it checks the outcome
+  before it saves an image: the clean shot is written only when the run really
+  came out clean with no findings and a share link, the infected shot only when it
+  really found something and published no link. The screenshots were re-rendered,
+  the README and AppStream captions now say what is in them, and the upload host
+  in those runs is a stand-in, so refreshing the documentation can never publish a
+  file.
 
 ## [0.2.1] - 2026-10-16
 

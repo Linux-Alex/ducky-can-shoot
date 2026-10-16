@@ -121,10 +121,18 @@ Screenshots are documentation, so they go stale. Re-render them with:
 make screenshots          # or: python3 scripts/make-screenshots.py
 ```
 
-The script starts the real interface offscreen, drives it with a synthetic medium
-(EICAR, a Duckyscript payload, an autorun.inf, a double extension, PowerShell and
-batch samples) and writes the PNGs into `docs/images/`. It exits non-zero if QML
-prints any warning, which makes it a useful smoke test on its own.
+The script starts the real interface offscreen, drives it with two synthetic
+media (one clean, one carrying EICAR, a Duckyscript payload, an autorun.inf, a
+double extension, PowerShell and batch samples) and writes the PNGs into
+`docs/images/`. It exits non-zero if QML prints any warning, which makes it a
+useful smoke test on its own.
+
+Two things keep the pictures honest. The clean medium holds no samples at all, so
+the "clean verdict" shot cannot show a threat list, and the script refuses to save
+a shot whose run came out differently from its caption (a clean run has to be
+clean with no findings and a share link; an infected run has to have findings and
+no link). The upload host is replaced by a stand-in, so re-rendering the
+documentation never publishes a file.
 
 ## Known gaps before 1.0
 

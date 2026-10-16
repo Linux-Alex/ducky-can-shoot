@@ -60,11 +60,11 @@
 
   <screenshots>
     <screenshot type="default">
-      <caption>The live view: seven stages, counters and the findings as they appear</caption>
+      <caption>The live view: seven stages, counters and throughput during a scan</caption>
       <image>https://raw.githubusercontent.com/Linux-Alex/ducky-can-shoot/main/docs/images/live-view.png</image>
     </screenshot>
     <screenshot>
-      <caption>A clean verdict with the share link</caption>
+      <caption>A clean verdict: no findings, the archive and the share link</caption>
       <image>https://raw.githubusercontent.com/Linux-Alex/ducky-can-shoot/main/docs/images/result-view.png</image>
     </screenshot>
     <screenshot>
