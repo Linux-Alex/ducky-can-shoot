@@ -10,6 +10,15 @@ if [ "$1" = "configure" ]; then
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then
         gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
     fi
+    # Plasma keeps a cache of the desktop entries and of the icons it looked up;
+    # a newly installed entry with a brand new icon stays invisible (or keeps the
+    # icon of the package it replaces) until that cache is rebuilt.
+    for tool in kbuildsycoca6 kbuildsycoca5; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            "$tool" --noincremental || true
+            break
+        fi
+    done
     # Compile the bytecode the way Debian expects (dh_python3 would emit this):
     # without it the interpreter writes __pycache__ at run time, as root, and
     # dpkg then refuses to remove that directory again.

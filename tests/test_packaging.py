@@ -138,7 +138,11 @@ def test_the_maintainer_scripts_are_careful() -> None:
 
     # Python bytecode is compiled and cleaned the Debian way, so that running the
     # program does not leave a __pycache__ that dpkg cannot remove
-    assert "py3compile -p ducky-can-shoot" in (DEBIAN / "postinst").read_text(encoding="utf-8")
+    postinst = (DEBIAN / "postinst").read_text(encoding="utf-8")
+    assert "py3compile -p ducky-can-shoot" in postinst
+    # a Plasma session caches desktop entries and icon lookups: without this the
+    # new icon can stay invisible until the next login
+    assert "kbuildsycoca6" in postinst and "--noincremental" in postinst
 
     postrm = (DEBIAN / "postrm").read_text(encoding="utf-8")
     assert "py3clean -p ducky-can-shoot" in postrm
