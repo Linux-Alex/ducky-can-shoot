@@ -17,7 +17,9 @@ License: GPL-3.0-or-later
  On Debian systems, the complete text of the GNU General Public License version 3
  can be found in /usr/share/common-licenses/GPL-3.
 
-Files: packaging/icons/*
+Files: docs/images/detail-icon.png docs/images/less-detail-icon.png packaging/icons/* src/dcs/gui/qml/icons/dcs.png
 Copyright: 2026 Ducky Can Shoot contributors
 License: GPL-3.0-or-later
- The application artwork: the duck holding a pistol, drawn for this project.
+ The application artwork: two illustrations of the duck holding a pistol, drawn
+ for this project with an image generator and released under the same licence as
+ the rest of it.  scripts/make-icons.py renders the installed sizes from them.

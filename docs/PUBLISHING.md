@@ -28,7 +28,7 @@ interface (Settings):
 | Website | leave empty, or point at your own page about the project |
 | Topics | `usb` `malware` `antivirus` `security-tools` `clamav` `python` `qt` `kirigami` `kde` `forensics` `linux` |
 | Social preview | upload `docs/images/banner.png` (already 1280x640, the size GitHub asks for) |
-| Icon | nothing to do: the application artwork lives in `packaging/icons/hicolor` - the scalable SVG, the Breeze-style symbolic variant and the bitmap sizes - and `scripts/install.sh` installs all of it |
+| Icon | nothing to do: the artwork is the two illustrations in `docs/images`, `scripts/make-icons.py` renders the nine theme sizes from them into `packaging/icons/hicolor`, and `scripts/install.sh` installs all of it |
 | Features | enable **Issues** and **Discussions**; disable **Wiki** and **Projects** unless you want them |
 | Pull requests | allow squash merging; enable "automatically delete head branches" |
 | Releases | nothing to set up: pushing a tag builds and publishes them |

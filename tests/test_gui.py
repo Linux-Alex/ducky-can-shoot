@@ -1345,7 +1345,7 @@ def test_the_about_page_shows_the_shipped_icon(backend: Backend, qapp: Any, qt_m
 
     icon = window.findChild(QObject, "aboutIcon")
     assert icon is not None, "the About page does not show the application icon"
-    assert icon.property("source").toString().endswith("icons/dcs.svg")
+    assert icon.property("source").toString().endswith("icons/dcs.png")
     assert icon.property("implicitWidth") > 0
     assert icon.property("implicitHeight") > 0
 

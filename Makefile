@@ -46,8 +46,8 @@ doctor: ## Check every dependency and the configuration
 screenshots: ## Re-render the documentation screenshots (offscreen)
 	PYTHONPATH=$(PYTHONPATH) QT_QPA_PLATFORM=offscreen $(PYTHON) scripts/make-screenshots.py
 
-icons: ## Re-render the application icons at every size (needs an SVG renderer)
-	./scripts/make-icons.sh
+icons: ## Re-render the application icons from the illustrations (needs python3-pil)
+	./scripts/make-icons.py
 
 deb: ## Build the Debian package into dist/ (arch independent)
 	./scripts/build-deb.sh

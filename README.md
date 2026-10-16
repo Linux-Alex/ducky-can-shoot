@@ -411,6 +411,14 @@ assistance.**
   mattered most: uploads larger than 1 MiB used to be truncated silently. A user
   noticed a corrupt download; the cause was a file-protocol bug in the upload
   reader, and the fix is covered by a test that asserts every byte arrives.
+- The **application artwork** is the maintainer's: two illustrations of the duck
+  holding the pistol, drawn with an image generator and kept in `docs/images/`
+  (`detail-icon.png` and `less-detail-icon.png`). `scripts/make-icons.py` cuts
+  the white background out of them and renders the nine sizes a theme asks for -
+  the flatter drawing for the small sizes, the detailed one from 128 px up - and
+  the About page shows the detailed one. It is an illustration rather than a
+  vector, so there is no SVG of it and no monochrome variant; the interface's own
+  icons come from your Plasma icon theme and stay native.
 
 Practical consequences: the code and the prose are unusually uniform, comments
 explain intent rather than history, and the commit log is descriptive. Treat

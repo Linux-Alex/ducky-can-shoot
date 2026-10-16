@@ -1,11 +1,10 @@
-"""The application artwork: the SVGs, the bitmap sizes and what installs them.
+"""The application artwork: the illustrations, the rendered sizes, the wiring.
 
-The icon is the only artwork this project ships, and it is used from three places
-that can drift apart: the package (the wheel carries it), the desktop
-(`scripts/install.sh` copies it into hicolor) and the interface (the About page
-shows it).  These tests keep the three in step, and they check the two things an
-icon must have to work at all: an SVG that carries its own geometry, and bitmaps
-with a transparent background.
+The icon is an illustration rather than a vector, so the checks here are about
+the *chain*: the two source drawings exist, every size a theme asks for is
+rendered from them with transparency and without a white halo edge, the copy that
+ships inside the package is the same drawing as the one in the theme, and the
+installer, the Debian package and the interface all point at it.
 """
 
 from __future__ import annotations
@@ -16,29 +15,30 @@ import struct
 import subprocess
 import sys
 import textwrap
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-HICOLOR = ROOT / "packaging" / "icons" / "hicolor"
-SCALABLE = HICOLOR / "scalable" / "apps"
-APP_ICON = SCALABLE / "org.kde.dcs.svg"
-SYMBOLIC_ICON = SCALABLE / "org.kde.dcs-symbolic.svg"
-IN_APP_ICON = ROOT / "src" / "dcs" / "gui" / "qml" / "icons" / "dcs.svg"
-DESKTOP_FILE = ROOT / "packaging" / "org.kde.dcs.desktop"
-INSTALL_SCRIPT = ROOT / "scripts" / "install.sh"
-UNINSTALL_SCRIPT = ROOT / "scripts" / "uninstall.sh"
-ICON_SCRIPT = ROOT / "scripts" / "make-icons.sh"
+REPO = Path(__file__).resolve().parent.parent
+HICOLOR = REPO / "packaging" / "icons" / "hicolor"
+IN_APP = REPO / "src" / "dcs" / "gui" / "qml" / "icons" / "dcs.png"
+GENERATOR = REPO / "scripts" / "make-icons.py"
+INSTALL_SCRIPT = REPO / "scripts" / "install.sh"
+UNINSTALL_SCRIPT = REPO / "scripts" / "uninstall.sh"
+PACKAGE_SCRIPT = REPO / "scripts" / "build-deb.sh"
+DESKTOP_FILE = REPO / "packaging" / "org.kde.dcs.desktop"
+ABOUT_VIEW = REPO / "src" / "dcs" / "gui" / "qml" / "views" / "AboutView.qml"
+APP_PY = REPO / "src" / "dcs" / "gui" / "app.py"
+
+#: the illustrations drawn for this project, and the only artwork that is used
+SOURCES = (
+    REPO / "docs" / "images" / "detail-icon.png",
+    REPO / "docs" / "images" / "less-detail-icon.png",
+)
 
 #: every size a theme may ask a raster icon for
 SIZES = (16, 22, 24, 32, 48, 64, 128, 256, 512)
 
-SVG_NS = "{http://www.w3.org/2000/svg}"
-
-#: the shell loop variable, spelled so that this file contains no template
-#: looking sequence of its own
 SIZE_VARIABLE = "$" + "{size}"
 
 
@@ -52,6 +52,10 @@ def png_header(path: Path) -> tuple[int, int, int, int]:
     return width, height, depth, colour_type
 
 
+def icon_path(size: int) -> Path:
+    return HICOLOR / (str(size) + "x" + str(size)) / "apps" / "org.kde.dcs.png"
+
+
 def size_loop_of(script: Path) -> tuple[int, ...]:
     """The sizes a 'for size in ...' loop in *script* walks over."""
     line = next(
@@ -60,73 +64,51 @@ def size_loop_of(script: Path) -> tuple[int, ...]:
         if line.startswith("for size in")
     )
     listed = line.split("in", 1)[1].split(";")[0].strip()
-    if not listed:  # a loop over a variable, e.g. 'for size in $SIZES'
-        variable = line.split("in", 1)[1].split(";")[0].strip().strip('"')
-        source = next(
-            entry
-            for entry in script.read_text(encoding="utf-8").splitlines()
-            if entry.startswith(variable.lstrip("$") + "=") or entry.startswith("SIZES=")
-        )
-        listed = source.split("=", 1)[1].strip().strip('"')
     return tuple(int(part) for part in listed.split())
 
 
 # ---------------------------------------------------------------------------
-# the scalable icons
+# the illustrations
 # ---------------------------------------------------------------------------
 
 
-def test_the_application_icon_is_a_self_contained_svg() -> None:
-    text = APP_ICON.read_text(encoding="utf-8")
-    root = ET.parse(APP_ICON).getroot()
+@pytest.mark.parametrize("source", SOURCES, ids=lambda path: path.name)
+def test_the_illustrations_are_in_the_repository(source: Path) -> None:
+    """They are the artwork, so they are part of the build, not a local leftover."""
+    assert source.is_file(), f"{source} is missing: it is the artwork"
 
-    assert root.tag == SVG_NS + "svg"
-    assert root.get("viewBox"), "an icon has to scale, so it needs a viewBox"
-    # nothing may be pulled in from outside: an icon is one file
-    assert "<image" not in text and "<script" not in text and "href" not in text
-
-
-def test_the_application_icon_has_the_shapes_it_is_about() -> None:
-    """A duck, a bill, a gun and the badge: the drawing is not empty."""
-    root = ET.parse(APP_ICON).getroot()
-    circles = list(root.iter(SVG_NS + "circle"))
-    ellipses = list(root.iter(SVG_NS + "ellipse"))
-    paths = list(root.iter(SVG_NS + "path"))
-
-    assert len(circles) >= 4, "the badge, the muzzle and the bore are circles"
-    assert len(ellipses) >= 4, "two eyes and two wings"
-    assert len(paths) >= 3, "the duck, the slide and the bill"
-    colours = {element.get("fill") for element in root.iter() if element.get("fill")}
-    assert "#FED329" in colours, "the duck is yellow"
-    assert "#F59E0B" in colours, "the bill is orange"
-    assert "#0A66C8" in colours, "the wings are blue"
+    width, height, depth, _colour = png_header(source)
+    assert width == height, "the artwork is square"
+    assert width >= 512, "the artwork has to be big enough to render 512 px from"
+    assert depth == 8
 
 
-def test_the_symbolic_icon_follows_the_breeze_convention() -> None:
-    text = SYMBOLIC_ICON.read_text(encoding="utf-8")
-    root = ET.parse(SYMBOLIC_ICON).getroot()
+def test_the_icon_is_made_from_those_two_illustrations_and_nothing_else() -> None:
+    text = GENERATOR.read_text(encoding="utf-8")
 
-    assert "currentColor" in text, "a symbolic icon takes the colour of the theme"
-    assert "ColorScheme-Text" in text, "Breeze names the colour class that way"
-    assert 'fill-rule="evenodd"' in text, "the eyes and the barrel are holes"
-    assert root.get("viewBox") == "0 0 22 22", "symbolic icons use the small grid"
-    assert "<image" not in text and "href" not in text
+    for source in SOURCES:
+        assert source.name in text, f"{source.name} is not used"
+    assert "floodfill" in text, "the white background is cut out, not painted over"
+    assert "scalable" not in text, "the artwork is raster: no vector icon is invented"
+    assert os.access(GENERATOR, os.X_OK)
 
 
-def test_the_icon_inside_the_package_is_the_same_drawing() -> None:
-    """The About page shows qml/icons/dcs.svg while the launcher shows the one
-    from packaging/: two copies of one drawing must not drift apart."""
-    assert IN_APP_ICON.read_bytes() == APP_ICON.read_bytes()
+def test_the_generator_covers_every_shipped_size() -> None:
+    text = GENERATOR.read_text(encoding="utf-8")
+    line = next(entry for entry in text.splitlines() if entry.startswith("SIZES = "))
+    declared = tuple(int(part) for part in line.split("=", 1)[1].strip().strip("()").split(","))
+
+    assert declared == SIZES, "the generator writes exactly the sizes that are shipped"
 
 
 # ---------------------------------------------------------------------------
-# the bitmap sizes
+# the rendered sizes
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("size", SIZES)
-def test_every_bitmap_size_exists_with_its_own_size_and_transparency(size: int) -> None:
-    path = HICOLOR / (str(size) + "x" + str(size)) / "apps" / "org.kde.dcs.png"
+def test_every_size_is_square_transparent_and_free_of_a_white_edge(size: int) -> None:
+    path = icon_path(size)
     assert path.is_file(), f"{path} is missing"
 
     width, height, depth, colour_type = png_header(path)
@@ -135,10 +117,58 @@ def test_every_bitmap_size_exists_with_its_own_size_and_transparency(size: int) 
     # 6 is truecolour with alpha; anything else would sit on a white square
     assert colour_type == 6, f"{path} has no alpha channel"
 
+    pytest.importorskip("PIL.Image", reason="Pillow is needed to inspect the pixels")
+    from PIL import Image
 
-def test_the_bitmaps_are_small_enough_to_ship() -> None:
-    biggest = HICOLOR / "512x512" / "apps" / "org.kde.dcs.png"
-    assert biggest.stat().st_size < 200 * 1024
+    with Image.open(path) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+        assert alpha.getextrema()[0] == 0, "the background has to be transparent"
+        for corner in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)):
+            assert alpha.getpixel(corner) < 8, f"{path} is opaque in a corner"
+
+
+def test_the_artwork_is_not_a_flat_placeholder_any_more() -> None:
+    """The drawing has real colours in it: a duck, not a two colour glyph."""
+    pytest.importorskip("PIL.Image", reason="Pillow is needed to inspect the pixels")
+    from PIL import Image
+
+    with Image.open(icon_path(512)) as image:
+        colours = {colour for _count, colour in image.convert("RGB").getcolors(maxcolors=1 << 24)}
+
+    assert len(colours) > 5000, "an illustration has thousands of colours"
+    # the duck is yellow and the accents are blue: those hues have to be there
+    yellowish = [c for c in colours if c[0] > 180 and c[1] > 140 and c[2] < 120]
+    bluish = [c for c in colours if c[2] > 140 and c[2] > c[0] + 40]
+    assert len(yellowish) > 100, "no yellow in the artwork"
+    assert len(bluish) > 100, "no blue in the artwork"
+
+
+def test_the_sizes_stay_small_enough_to_ship() -> None:
+    assert icon_path(512).stat().st_size < 400 * 1024
+    total = sum(icon_path(size).stat().st_size for size in SIZES)
+    assert total < 600 * 1024, "the whole set should stay well under a megabyte"
+
+
+def test_no_vector_icon_is_left_over_from_the_previous_artwork() -> None:
+    """The old drawing is gone: the repository ships one artwork, this one."""
+    assert not (HICOLOR / "scalable").exists()
+    assert not (REPO / "src" / "dcs" / "gui" / "qml" / "icons" / "dcs.svg").exists()
+
+
+# ---------------------------------------------------------------------------
+# the copies that travel with the program
+# ---------------------------------------------------------------------------
+
+
+def test_the_icon_inside_the_package_is_the_same_drawing() -> None:
+    """The About page and the window icon use the copy inside the package; it
+    must not drift away from the one the theme installs."""
+    assert IN_APP.read_bytes() == icon_path(512).read_bytes()
+
+
+def test_the_window_icon_and_the_about_page_use_that_copy() -> None:
+    assert '"icons", "dcs.png"' in APP_PY.read_text(encoding="utf-8")
+    assert 'source: "../icons/dcs.png"' in ABOUT_VIEW.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -150,52 +180,36 @@ def test_the_desktop_entry_names_an_icon_that_exists() -> None:
     icon_line = [line for line in DESKTOP_FILE.read_text().splitlines() if line.startswith("Icon=")]
 
     assert icon_line == ["Icon=org.kde.dcs"]
-    assert APP_ICON.name == "org.kde.dcs.svg"
+    assert icon_path(256).name == "org.kde.dcs.png"
 
 
-def test_the_installer_installs_the_scalable_icons_and_every_size() -> None:
+def test_the_installer_installs_every_size() -> None:
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "scalable/apps/org.kde.dcs.svg" in text
-    assert "scalable/apps/org.kde.dcs-symbolic.svg" in text
-    # the bitmaps are installed by one loop over the sizes, into hicolor
     assert "ICONROOT" in text
     assert "apps/org.kde.dcs.png" in text
     assert SIZE_VARIABLE + "x" + SIZE_VARIABLE in text
+    assert "scalable" not in text, "there is no vector version to install"
 
 
 def test_the_installer_keeps_the_size_list_in_step_with_the_files() -> None:
-    """The loop in install.sh must cover exactly the sizes that are shipped."""
     assert size_loop_of(INSTALL_SCRIPT) == SIZES
+    assert size_loop_of(PACKAGE_SCRIPT) == SIZES
 
 
 def test_the_uninstaller_removes_what_the_installer_wrote() -> None:
     text = UNINSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "org.kde.dcs.svg" in text
-    assert "org.kde.dcs-symbolic.svg" in text
     assert "org.kde.dcs.png" in text
-
-
-def test_the_about_page_shows_the_icon_that_ships_with_the_package() -> None:
-    about = (ROOT / "src" / "dcs" / "gui" / "qml" / "views" / "AboutView.qml").read_text()
-
-    assert 'source: "../icons/dcs.svg"' in about
-    assert IN_APP_ICON.is_file()
-
-
-# ---------------------------------------------------------------------------
-# and what Qt does with them
-# ---------------------------------------------------------------------------
+    assert "ICONROOT" in text
 
 
 def test_qt_resolves_the_icon_in_every_size(tmp_path: Path) -> None:
     """Install the icons the way install.sh does and ask Qt to load them.
 
-    File names, sizes and theme layout are only worth anything if the toolkit
-    finds them, and an SVG is not decoded without the Qt SVG plugin.  The check
-    runs in a subprocess: Qt caches its icon theme for the lifetime of a
-    process, so a lookup started after the interpreter is up would prove nothing.
+    Raster sizes, theme layout and file names are only worth anything if the
+    toolkit finds them, and Qt caches its icon theme for the lifetime of a
+    process, so the lookup runs in a subprocess of its own.
     """
     pytest.importorskip("PyQt6.QtGui", reason="PyQt6 is not installed")
     data = tmp_path / "data"
@@ -217,10 +231,16 @@ def test_qt_resolves_the_icon_in_every_size(tmp_path: Path) -> None:
 
         sizes = sorted({size.width() for size in icon.availableSizes()})
         print("sizes:", ",".join(str(size) for size in sizes))
+        if sizes != [16, 22, 24, 32, 48, 64, 128, 256, 512]:
+            sys.exit(f"unexpected sizes: {sizes}")
         for size in (16, 22, 24, 32, 48, 64, 128, 256, 512):
             pixmap = icon.pixmap(size, size)
-            if pixmap.isNull() or pixmap.width() != size:
-                sys.exit(f"no {size}px pixmap: {pixmap.width()}x{pixmap.height()}")
+            if pixmap.isNull():
+                sys.exit(f"no {size}px pixmap")
+            # Qt hands back the closest raster it has and scales it, so the size
+            # may differ by a pixel or two (it answers 24 with the 22 entry)
+            if abs(pixmap.width() - size) > 2 or pixmap.width() != pixmap.height():
+                sys.exit(f"{size}px became {pixmap.width()}x{pixmap.height()}")
         print("pixmaps: ok")
         """
     )
@@ -236,12 +256,3 @@ def test_qt_resolves_the_icon_in_every_size(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr[-2000:] or result.stdout[-2000:]
     assert "sizes:" in result.stdout and "512" in result.stdout
     assert "pixmaps: ok" in result.stdout
-
-
-def test_the_icon_rendering_script_covers_every_size() -> None:
-    text = ICON_SCRIPT.read_text(encoding="utf-8")
-    line = next(entry for entry in text.splitlines() if entry.startswith("SIZES="))
-    declared = tuple(int(part) for part in line.split("=", 1)[1].strip().strip('"').split())
-
-    assert declared == SIZES, "the script writes exactly the sizes that are shipped"
-    assert "org.kde.dcs.svg" in text, "it renders the scalable source"

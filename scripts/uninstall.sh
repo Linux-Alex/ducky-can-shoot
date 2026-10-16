@@ -6,7 +6,6 @@ VENV="${VENV:-$HOME/.local/share/dcs/venv}"
 BINDIR="${PREFIX:-$HOME/.local}/bin"
 APPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 ICONROOT="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
-ICONDIR="$ICONROOT/scalable/apps"
 
 # the watcher must not keep running after the application is gone
 AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/org.kde.dcs.watch.desktop"
@@ -14,7 +13,6 @@ rm -f "$AUTOSTART"
 rm -rf "$VENV"
 rm -f "$BINDIR/dcs" "$BINDIR/dcs-gui"
 rm -f "$APPDIR/org.kde.dcs.desktop"
-rm -f "$ICONDIR/org.kde.dcs.svg" "$ICONDIR/org.kde.dcs-symbolic.svg"
 for size in 16 22 24 32 48 64 128 256 512; do
     rm -f "$ICONROOT/${size}x${size}/apps/org.kde.dcs.png"
     rmdir "$ICONROOT/${size}x${size}/apps" "$ICONROOT/${size}x${size}" 2>/dev/null || true

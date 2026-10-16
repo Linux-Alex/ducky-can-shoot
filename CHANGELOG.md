@@ -8,7 +8,18 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **The application icon is the maintainer's own artwork now.** Two illustrations
+  of the duck holding the pistol (`docs/images/detail-icon.png` and
+  `less-detail-icon.png`, drawn with an image generator) replace the vector mark
+  that was there before. `scripts/make-icons.py` (and `make icons`) cuts the white
+  background out with a flood fill, trims and squares the drawing, and renders the
+  nine sizes a theme asks for: the flatter illustration for 16 to 64 px, where a
+  1254 px drawing would otherwise turn to mush, and the detailed one from 128 px
+  up. The About page and the window icon use the 512 px copy inside the package.
+  Being an illustration, the icon is raster: there is no SVG and no monochrome
+  variant of it, which the documentation now says outright.
 
 ## [0.2.0] - 2026-10-16
 

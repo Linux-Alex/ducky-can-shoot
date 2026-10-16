@@ -24,7 +24,6 @@ VENV="${VENV:-$HOME/.local/share/dcs/venv}"
 BINDIR="$PREFIX/bin"
 APPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 ICONROOT="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
-ICONDIR="$ICONROOT/scalable/apps"
 
 #: off (the default) | notify | open | open_run
 WATCH_MODE="${WATCH_MODE:-}"
@@ -72,15 +71,11 @@ ln -sf "$VENV/bin/dcs" "$BINDIR/dcs"
 ln -sf "$VENV/bin/dcs-gui" "$BINDIR/dcs-gui"
 
 say "installing the desktop entry and the icons"
-mkdir -p "$APPDIR" "$ICONDIR"
+mkdir -p "$APPDIR"
 install -m 644 packaging/org.kde.dcs.desktop "$APPDIR/org.kde.dcs.desktop"
 
-# The scalable files are the ones a modern desktop uses, including the symbolic
-# one for monochrome places; the bitmaps are the fallback for launchers and
-# docks that never look at scalable/ at all.
-install -m 644 packaging/icons/hicolor/scalable/apps/org.kde.dcs.svg "$ICONDIR/org.kde.dcs.svg"
-install -m 644 packaging/icons/hicolor/scalable/apps/org.kde.dcs-symbolic.svg \
-    "$ICONDIR/org.kde.dcs-symbolic.svg"
+# The artwork is an illustration, so it ships as the sizes a theme asks for
+# (scripts/make-icons.py renders them); launchers and panels pick the closest.
 for size in 16 22 24 32 48 64 128 256 512; do
     install -d "$ICONROOT/${size}x${size}/apps"
     install -m 644 "packaging/icons/hicolor/${size}x${size}/apps/org.kde.dcs.png" \

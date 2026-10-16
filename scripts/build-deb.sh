@@ -36,11 +36,26 @@ trap 'rm -rf "$TREE"' EXIT
 say "packaging $PACKAGE $VERSION-$REVISION ($ARCH)"
 
 # ---------------------------------------------------------------- the payload
-if [ -z "$WHEEL" ]; then
-    WHEEL="$(ls -t dist/*.whl 2>/dev/null | head -1 || true)"
+if [ -n "$WHEEL" ] && [ ! -f "$WHEEL" ]; then
+    printf 'no such wheel: %s\n' "$WHEEL" >&2
+    exit 2
 fi
-if [ -z "$WHEEL" ] || [ ! -f "$WHEEL" ]; then
+
+if [ -z "$WHEEL" ]; then
+    CANDIDATE="$(ls -t dist/*.whl 2>/dev/null | head -1 || true)"
+    # A wheel that predates the sources would package the last release instead
+    # of what is in the checkout.  An explicit --wheel is trusted; a discovered
+    # one is only used while it is newer than everything that goes into it.
+    if [ -n "$CANDIDATE" ] && [ ! -n "$(find src packaging pyproject.toml -newer "$CANDIDATE" -print -quit 2>/dev/null)" ]; then
+        WHEEL="$CANDIDATE"
+    else
+        [ -n "$CANDIDATE" ] && say "the wheel in dist/ predates the checkout"
+    fi
+fi
+
+if [ -z "$WHEEL" ]; then
     say "building the wheel"
+    rm -f dist/*.whl
     python3 -m build --wheel --outdir dist >/dev/null
     WHEEL="$(ls -t dist/*.whl | head -1)"
 fi
@@ -59,10 +74,6 @@ for size in 16 22 24 32 48 64 128 256 512; do
     install -D -m 644 "packaging/icons/hicolor/${size}x${size}/apps/org.kde.dcs.png" \
         "$TREE/usr/share/icons/hicolor/${size}x${size}/apps/org.kde.dcs.png"
 done
-install -D -m 644 packaging/icons/hicolor/scalable/apps/org.kde.dcs.svg \
-    "$TREE/usr/share/icons/hicolor/scalable/apps/org.kde.dcs.svg"
-install -D -m 644 packaging/icons/hicolor/scalable/apps/org.kde.dcs-symbolic.svg \
-    "$TREE/usr/share/icons/hicolor/scalable/apps/org.kde.dcs-symbolic.svg"
 
 say "installing the man page and the documentation"
 mkdir -p "$TREE/usr/share/man/man1"
