@@ -74,6 +74,11 @@ say "installing the desktop entry and the icons"
 mkdir -p "$APPDIR"
 install -m 644 packaging/org.kde.dcs.desktop "$APPDIR/org.kde.dcs.desktop"
 
+# An installation from before the artwork became an illustration still has a
+# vector icon; a theme prefers that over the bitmaps, so it is taken away here.
+rm -f "$ICONROOT/scalable/apps/org.kde.dcs.svg" \
+      "$ICONROOT/scalable/apps/org.kde.dcs-symbolic.svg"
+
 # The artwork is an illustration, so it ships as the sizes a theme asks for
 # (scripts/make-icons.py renders them); launchers and panels pick the closest.
 for size in 16 22 24 32 48 64 128 256 512; do
