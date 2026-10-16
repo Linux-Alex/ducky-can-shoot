@@ -98,35 +98,11 @@ jobs:
           name: dist
           path: dist
 
-      - name: Extract the changelog section for this tag
+      # The notes are built by the script, never by appending a shell heredoc: a
+      # heredoc runs command substitutions, which turned the code fences of the
+      # first two releases into the output of "apt install" and "pip install".
+      - name: Write the release notes for this tag
         run: python3 scripts/changelog-for-tag.py "${GITHUB_REF_NAME}" --output release-notes.md
-
-      - name: Add the installation section
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          cat >> release-notes.md <<EOF
-
-          ## Installation
-
-          Debian, Ubuntu, Kubuntu and anything else with apt:
-
-          ```bash
-          sudo apt install ./ducky-can-shoot_${version}-1_all.deb
-          ```
-
-          Any distribution with Python 3.11 and PyQt6:
-
-          ```bash
-          pip install ducky_can_shoot-${version}-py3-none-any.whl
-          ```
-
-          Or from the source tree, without root:
-
-          ```bash
-          git clone https://github.com/Linux-Alex/ducky-can-shoot.git
-          cd ducky-can-shoot && ./scripts/install.sh
-          ```
-          EOF
 
       - name: Create the release
         env:

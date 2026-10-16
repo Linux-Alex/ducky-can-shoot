@@ -20,6 +20,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DEBIAN = REPO / "packaging" / "debian"
 BUILD_SCRIPT = REPO / "scripts" / "build-deb.sh"
+NOTES_SCRIPT = REPO / "scripts" / "changelog-for-tag.py"
 BUMP_SCRIPT = REPO / "scripts" / "bump-version.py"
 CONTROL = DEBIAN / "control.in"
 METAINFO = REPO / "packaging" / "org.kde.dcs.metainfo.xml"
@@ -227,6 +228,67 @@ def test_the_man_page_documents_the_command() -> None:
 # ---------------------------------------------------------------------------
 # starting a release
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# the release notes
+# ---------------------------------------------------------------------------
+
+
+def release_notes(*args: str) -> str:
+    """Run the notes script the way the release workflow does."""
+    result = subprocess.run(
+        [sys.executable, str(NOTES_SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def test_the_release_notes_carry_the_changelog_and_the_install_steps() -> None:
+    notes = release_notes("v9.9.9", "--changelog", str(REPO / "CHANGELOG.md"))
+
+    assert "## Installation" in notes, "the install steps are part of the body"
+    for route in ("apt install ./ducky-can-shoot_9.9.9-1_all.deb",
+                  "pip install ducky_can_shoot-9.9.9-py3-none-any.whl",
+                  "git clone"):
+        assert route in notes, f"{route} is missing from the notes"
+    assert notes.count("```bash") == 3
+    assert notes.count("```") == 6, "every code block is opened and closed"
+    assert "CHANGELOG.md" in notes
+
+
+def test_the_release_notes_quote_the_changelog_for_that_version() -> None:
+    notes = release_notes("0.2.0")
+
+    assert "### Changed" in notes, "the 0.2.0 section is quoted"
+    assert "The interface follows the KDE Human Interface Guidelines" in notes
+    assert "## [0.2.0]" not in notes, "the heading itself is left out"
+
+
+def test_the_notes_are_not_run_through_a_shell() -> None:
+    """The first two releases lost their code fences this way.
+
+    A shell heredoc performs command substitution, so a fenced block written
+    into one turned into the *output* of apt, pip and the installer - complete
+    with terminal escape codes.
+    """
+    text = NOTES_SCRIPT.read_text(encoding="utf-8")
+    for forbidden in ("subprocess", "os.system", "Popen", "check_output"):
+        assert forbidden not in text, f"the notes script must not shell out: {forbidden}"
+
+    workflow = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "cat >> release-notes.md" not in workflow, "notes are written by the script"
+    assert "<<EOF" not in workflow, "an unquoted heredoc would run what is inside it"
+
+
+def test_the_notes_can_be_the_changelog_alone() -> None:
+    notes = release_notes("0.2.0", "--changelog-only")
+
+    assert "## Installation" not in notes
+    assert "### Changed" in notes
 
 
 def test_the_version_bump_moves_every_place_that_carries_a_version(tmp_path: Path) -> None:
