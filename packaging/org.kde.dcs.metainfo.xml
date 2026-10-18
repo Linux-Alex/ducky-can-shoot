@@ -74,6 +74,11 @@
   </screenshots>
 
   <releases>
+    <release version="0.2.3" date="2026-10-18">
+      <description>
+        <p>See the changelog for what changed in 0.2.3.</p>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-10-18">
       <description>
         <p>See the changelog for what changed in 0.2.2.</p>

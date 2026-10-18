@@ -1392,14 +1392,18 @@ def test_the_update_check_reports_what_it_found(
     from dcs.core import updates
     from dcs.gui import backend as backend_module
 
+    # one patch above whatever is running, so the test keeps working after a
+    # version bump without having to think about it
+    parts = [int(part) for part in __version__.split(".")]
+    newer = f"{parts[0]}.{parts[1]}.{parts[2] + 1}"
     release = updates.Release.from_payload(
         {
-            "tag_name": "v0.2.3",
-            "name": "Ducky Can Shoot 0.2.3",
-            "html_url": "https://example.invalid/v0.2.3",
+            "tag_name": f"v{newer}",
+            "name": f"Ducky Can Shoot {newer}",
+            "html_url": f"https://example.invalid/v{newer}",
             "assets": [
                 {
-                    "name": "ducky_can_shoot-0.2.3-py3-none-any.whl",
+                    "name": f"ducky_can_shoot-{newer}-py3-none-any.whl",
                     "browser_download_url": "https://example.invalid/pkg.whl",
                     "size": 581157,
                 }
@@ -1423,10 +1427,10 @@ def test_the_update_check_reports_what_it_found(
 
     assert backend.updateState == "available"
     info = backend.updateInfo
-    assert info["latest"] == "0.2.3"
+    assert info["latest"] == newer
     assert info["canInstall"] is True
     assert info["state"] == "available"
-    assert "0.2.3 is available" in info["message"]
+    assert f"{newer} is available" in info["message"]
 
 
 def test_installing_without_a_check_does_nothing(backend: Backend, qapp: Any) -> None:

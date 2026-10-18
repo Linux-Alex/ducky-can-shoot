@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/tests-830%20passing-brightgreen" alt="830 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
-  <img src="https://img.shields.io/badge/status-0.2.2%20alpha-orange" alt="Status: 0.2.2 alpha">
+  <img src="https://img.shields.io/badge/status-0.2.3%20alpha-orange" alt="Status: 0.2.3 alpha">
   <img src="https://img.shields.io/badge/AI--assisted-partially-8957e5" alt="Partially AI assisted">
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="Pull requests welcome"></a>
 </p>
@@ -137,7 +137,7 @@ Or, on Debian and Ubuntu, from the `.deb` of a release (see
 [the releases page](https://github.com/Linux-Alex/ducky-can-shoot/releases)):
 
 ```bash
-sudo apt install ./ducky-can-shoot_0.2.2-1_all.deb
+sudo apt install ./ducky-can-shoot_0.2.3-1_all.deb
 ```
 
 The script builds a virtual environment that can see the distribution packages,
@@ -214,7 +214,7 @@ $ dcs run --device /dev/sdb1 --to someone@example.org --yes
 ==> email: notifying someone@example.org
      email            ok                    00:01 - sent to someone@example.org
 
-VERDICT: INFECTED    Ducky Can Shoot 0.2.2
+VERDICT: INFECTED    Ducky Can Shoot 0.2.3
 ------------------------------------------------------------------------
   medium        : SANDISK16 (/run/media/aleks/SANDISK16)
   files scanned : 12,480 (3.4 GiB)
@@ -410,7 +410,7 @@ enabled:
 
 ```bash
 make deb
-sudo apt install ./dist/ducky-can-shoot_0.2.2-1_all.deb
+sudo apt install ./dist/ducky-can-shoot_0.2.3-1_all.deb
 man dcs
 ```
 
