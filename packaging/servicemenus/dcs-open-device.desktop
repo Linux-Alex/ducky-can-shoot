@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/blockdevice;
+Actions=open;
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-Priority=TopLevel
+Icon=org.kde.dcs
+Name=Open in Ducky Can Shoot
+
+[Desktop Action open]
+Name=Open in Ducky Can Shoot
+Icon=org.kde.dcs
+Exec=dcs gui --device %f

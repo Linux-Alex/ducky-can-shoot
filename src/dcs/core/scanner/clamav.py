@@ -91,9 +91,34 @@ class ClamAVProbe:
         return bool(self.binary)
 
 
+def _daemon_disabled() -> bool:
+    """True when something (the AppImage wrapper) says there is no clamd.
+
+    A bundled image never runs a daemon, so probing for one and then warning
+    that it is missing would be noise about a thing that was never installed.
+    """
+    return os.environ.get("DCS_CLAMAV_DAEMON", "").strip().lower() in {"0", "no", "false", "off"}
+
+
+def _database_dirs() -> tuple[str, ...]:
+    """Where to look for signatures; DCS_CLAMAV_DB comes first when it is set.
+
+    The AppImage carries its own database inside the image, where nothing else
+    would think of looking, so its wrapper points the engine at it.  The value
+    may name several directories separated by the path separator: the AppImage
+    puts a user-writable directory first (an updated database, if there is one)
+    and the read-only copy inside the image second.
+    """
+    override = os.environ.get("DCS_CLAMAV_DB", "").strip()
+    if not override:
+        return DB_DIRS
+    listed = tuple(part for part in override.split(os.pathsep) if part)
+    return (*listed, *DB_DIRS)
+
+
 def _newest_database() -> DatabaseInfo:
     newest = DatabaseInfo()
-    for directory in DB_DIRS:
+    for directory in _database_dirs():
         if not os.path.isdir(directory):
             continue
         try:
@@ -117,7 +142,7 @@ def probe(config: ClamAVConfig) -> ClamAVProbe:
     clamdscan = which(config.clamdscan_binary)
     clamscan = which(config.clamscan_binary)
 
-    if config.prefer_daemon and clamdscan:
+    if config.prefer_daemon and clamdscan and not _daemon_disabled():
         version = tool_version(clamdscan) or ""
         ping_ok = False
         try:
@@ -145,7 +170,7 @@ def probe(config: ClamAVConfig) -> ClamAVProbe:
         result.binary = clamscan
         result.mode = "clamscan"
         result.version = version
-        if not result.problem:
+        if not result.problem and not _daemon_disabled():
             result.problem = "clamd is not reachable; using the slower stand-alone clamscan"
         return result
 
@@ -187,7 +212,7 @@ class ClamAVEngine:
         warning = database_warning(self.config, self.probe.database)
         if warning:
             warnings.append(warning)
-        if self.probe.usable and self.probe.mode == "clamscan":
+        if self.probe.usable and self.probe.mode == "clamscan" and not _daemon_disabled():
             warnings.append(
                 "clamd is not running: the stand-alone clamscan reloads its database for "
                 "every batch and is several times slower"

@@ -175,6 +175,9 @@ class GioNotifier:
                 None,
             )
             self.last_id = int(reply.unpack()[0])
+            if not actions:
+                # an informational toast has no button: nothing to wait for
+                return ""
             answer = self._wait(context, events, actions)
         except Exception as exc:
             log.warning("cannot show a notification: %s", exc)
@@ -320,6 +323,9 @@ class DbusNotifier:
             return ""
         match = _ID_RE.search(result.stdout or "")
         self.last_id = int(match.group(1)) if match else 0
+        if not actions:
+            # an informational toast has no button: nothing to wait for
+            return ""
         return self.wait_for_action(actions)
 
     def wait_for_action(self, actions: Sequence[tuple[str, str]]) -> str:

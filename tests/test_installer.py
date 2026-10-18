@@ -395,6 +395,32 @@ def test_cancelled_flag_is_visible_before_running(tmp_path: Path) -> None:
     assert runner.cancelled is True
 
 
+def test_the_freshclam_plan_runs_freshclam_and_reloads_the_daemon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(installer.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(installer, "running_as_root", lambda: True)
+
+    plan = installer.build_freshclam_plan(write_script=False)
+
+    assert plan.possible is True
+    commands = plan.command_lines()
+    assert commands[0].startswith("freshclam")
+    assert any("try-reload-or-restart" in command for command in commands)
+    assert plan.method == "root"
+
+
+def test_the_freshclam_plan_says_when_freshclam_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
+
+    plan = installer.build_freshclam_plan(write_script=False)
+
+    assert plan.possible is False
+    assert "freshclam is not installed" in plan.blocker
+
+
 def test_script_marks_each_step_for_the_progress_view() -> None:
     steps = [InstallStep("Install ClamAV", ("apt-get", "install", "-y", "clamav"))]
     script = render_script(steps, distro="Ubuntu", manager="apt")

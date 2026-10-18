@@ -793,6 +793,82 @@ def test_watch_help_explains_every_mode(capsys: pytest.CaptureFixture[str]) -> N
         assert mode in captured.out
 
 
+def test_yara_status_says_where_the_pack_went(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.core import yara_pack
+
+    monkeypatch.setattr(
+        yara_pack,
+        "status",
+        lambda: {
+            "directory": "/data/dcs/yara/signature-base",
+            "installed": True,
+            "files": 740,
+            "rules": 5340,
+            "fetched": "2026-10-18T18:00:00Z",
+            "url": yara_pack.DEFAULT_URL,
+            "sha256": "abc",
+        },
+    )
+
+    assert main(["yara", "status"]) == 0
+
+    out = capsys.readouterr().out
+    assert "5340 rules" in out
+    assert "/data/dcs/yara/signature-base" in out
+
+
+def test_yara_update_prints_the_report(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.core import yara_pack
+
+    def fake_update(**kwargs: Any) -> yara_pack.UpdateReport:
+        return yara_pack.UpdateReport(
+            ok=True,
+            directory="/data/dcs/yara/signature-base",
+            added_files=["yara/one.yar"],
+            added_rules=["One"],
+            total_rules=1,
+            verified=True,
+            verify_note="1 rule file(s) compile",
+        )
+
+    monkeypatch.setattr(yara_pack, "update", fake_update)
+
+    assert main(["yara", "update"]) == 0
+
+    out = capsys.readouterr().out
+    assert "1 rules" in out or "1 rule" in out
+    assert "installed in /data/dcs/yara/signature-base" in out
+
+
+def test_yara_update_fails_loudly(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.core import yara_pack
+
+    monkeypatch.setattr(
+        yara_pack,
+        "update",
+        lambda **kwargs: yara_pack.UpdateReport(ok=False, error="no route to host"),
+    )
+
+    assert main(["yara", "update"]) != 0
+    assert "no route to host" in capsys.readouterr().err
+
+
+def test_signatures_reports_the_database(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    config = write_config(tmp_path)
+
+    code = main(["--config", str(config), "signatures"])
+
+    out = capsys.readouterr().out
+    assert "signatures:" in out
+    assert code in (0, 1)
+
+
 def test_the_gui_command_carries_the_medium_and_the_autorun_flag() -> None:
     assert dcs.cli.gui_command("/dev/sdb1")[-2:] == ["--device", "/dev/sdb1"]
     assert dcs.cli.gui_command("/dev/sdb1", autorun=True)[-3:] == [

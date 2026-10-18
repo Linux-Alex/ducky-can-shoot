@@ -55,6 +55,7 @@ when nothing overrides them.
 | --- | --- | --- | --- |
 | `confirm_before_upload` | bool | `true` | Ask before a job that will upload data. The GUI shows a dialog naming the host; the CLI prints a notice unless `--yes` is given. Set to `false` only on a machine where uploading is unremarkable. |
 | `keep_archive` | bool | `true` | Keep the local archive after a successful upload. When set to `false` the archive parts are deleted once every part has been uploaded. |
+| `unmount_after_job` | bool | `true` | Unmount the medium through udisks2 when the job finishes and show a "safe to unplug" notification. Turn it off to keep the medium mounted after the run. |
 | `output_dir` | string | `""` | Where archives are written. Empty means the XDG default. `--output-dir` overrides it for one run, and `DCS_ARCHIVE_DIR` overrides it globally. |
 | `ui_refresh_ms` | int | `100` | Minimum delay between two progress updates, in milliseconds. It is the throttle of `ProgressMeter`, so a large value reduces GUI and terminal traffic during a scan. |
 
@@ -306,6 +307,7 @@ lines you do not want to override.
 [general]
 confirm_before_upload = true
 keep_archive = true
+unmount_after_job = true
 output_dir = ""
 ui_refresh_ms = 100
 

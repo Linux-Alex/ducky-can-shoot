@@ -10,6 +10,7 @@ import html
 import smtplib
 import ssl
 import subprocess
+import time
 from email import message_from_binary_file, policy
 from email.message import EmailMessage
 from pathlib import Path
@@ -1181,6 +1182,19 @@ def test_the_gio_notifier_takes_the_notification_down_again(monkeypatch: pytest.
     # the notification closed itself (reason 1) before anything was pressed, and
     # closing it again is harmless; what matters is that nothing answered
     assert "CloseNotification" in connection.methods() or notifier.last_id == 11
+
+
+def test_a_notification_without_a_button_does_not_wait() -> None:
+    """An informational toast has nothing to answer, so it returns at once."""
+    connection = FakeConnection(notification_id=9)
+    notifier = GioNotifier(loader=gio_loader(connection), timeout_ms=5000)
+
+    started = time.monotonic()
+    assert notifier.notify("Safe to unplug: STICK", "nothing is using it", actions=()) == ""
+
+    assert time.monotonic() - started < 1.0, "it waited for a button nobody offered"
+    assert notifier.last_id == 9
+    assert "CloseNotification" not in connection.methods()
 
 
 def test_the_gio_notifier_is_quiet_without_pygobject() -> None:

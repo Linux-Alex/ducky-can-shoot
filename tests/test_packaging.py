@@ -115,6 +115,31 @@ def test_the_package_installs_the_paths_a_desktop_looks_at() -> None:
     assert "usr/lib/python3/dist-packages" in text
 
 
+def test_the_file_manager_actions_are_installed_and_sane() -> None:
+    """Dolphin's service menus are how the tool meets the medium where it is."""
+    text = BUILD_SCRIPT.read_text(encoding="utf-8")
+    assert "usr/share/kio/servicemenus" in text
+    assert "packaging/servicemenus" in text
+
+    scan = (REPO / "packaging" / "servicemenus" / "dcs-scan.desktop").read_text(encoding="utf-8")
+    open_device = (REPO / "packaging" / "servicemenus" / "dcs-open-device.desktop").read_text(
+        encoding="utf-8"
+    )
+
+    assert "MimeType=inode/directory;" in scan
+    assert "Exec=dcs gui --folder %f" in scan
+    assert "Scan with Ducky Can Shoot" in scan
+
+    assert "MimeType=inode/blockdevice;" in open_device
+    assert "Exec=dcs gui --device %f" in open_device
+    assert "Open in Ducky Can Shoot" in open_device
+
+    for text_block, name in ((scan, "scan"), (open_device, "open")):
+        assert "Type=Service" in text_block, name
+        assert "[Desktop Action" in text_block, name
+        assert "Icon=org.kde.dcs" in text_block, name
+
+
 def test_the_wrapper_runs_the_distribution_interpreter() -> None:
     """No virtualenv in the package: the distribution's python3 finds it."""
     wrapper = (DEBIAN / "dcs.sh").read_text(encoding="utf-8")
@@ -338,6 +363,18 @@ def test_the_version_bump_refuses_a_version_that_is_not_one(tmp_path: Path) -> N
 
     assert result.returncode == 2
     assert "is not a version" in result.stderr
+
+
+def test_the_release_carries_checksums_an_appimage_and_a_provenance_attestation() -> None:
+    """The docs promise verifiable downloads; the workflow has to deliver them."""
+    text = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "SHA256SUMS" in text
+    assert "actions/attest-build-provenance@" in text
+    assert "id-token: write" in text and "attestations: write" in text
+    assert "scripts/build-appimage.sh" in text
+    assert "ubuntu-26.04" in text, "the AppImage needs the KF6 that 24.04 does not have"
+    assert "ubuntu:26.04" in text, "the image is meant for a machine with none of it"
 
 
 def test_the_changelog_has_the_link_targets_the_bump_script_rewrites() -> None:

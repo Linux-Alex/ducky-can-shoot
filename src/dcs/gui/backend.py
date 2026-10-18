@@ -46,7 +46,7 @@ from dcs.core.device import (
     unmount_device,
 )
 from dcs.core.events import STAGE_ORDER
-from dcs.core.installer import Installer, build_plan, manual_instructions
+from dcs.core.installer import Installer, build_freshclam_plan, build_plan, manual_instructions
 from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import get_logger, log_ring
 from dcs.core.notify.desktop import ACTION_OPEN, build_notifier
@@ -161,6 +161,11 @@ class Backend(QObject):
         self._install_thread: threading.Thread | None = None
         self._install_state = "idle"
         self._install_outcome: dict[str, Any] = {}
+        #: "clamav" or "signatures": what the installer dialog is running
+        self._install_kind = "clamav"
+        #: the medium the running job came from, so it can be unmounted after
+        self._job_device = ""
+        self._job_label = ""
         #: idle | checking | uptodate | available | installing | restarting | error
         self._update_state = "idle"
         self._update_check: updates.UpdateCheck | None = None
@@ -808,6 +813,10 @@ class Backend(QObject):
             assume_yes=bool(options.get("assumeYes", False)),
         )
 
+        # remembered for the "safe to unplug" step at the end of the job
+        self._job_device = device_path
+        self._job_label = str(options.get("label") or self._source_label or "")
+
         self.stages_model.reset_stages()
         self.findings_model.clear()
         self.throughput_model.clear()
@@ -903,6 +912,47 @@ class Backend(QObject):
         self._set_state(FINISHED)
         self.toast.emit("info", "Job finished")
         self.refreshDevices()
+        self._maybe_unmount_after_job()
+
+    def _maybe_unmount_after_job(self) -> None:
+        """Unmount the medium and say that it can be unplugged.
+
+        A triage run ends with a stick that has been read but not changed; the
+        last thing the user has to know is that no process needs it any more,
+        and the last thing they should have to do is remember to unmount it.
+        """
+        node = self._job_device
+        label = self._job_label or node
+        self._job_device = ""
+        if not node or not self.config.general.unmount_after_job:
+            return
+        device = find_device(node)
+        if device is None or not device.mounted:
+            self.toast.emit("info", f"{label}: nothing is mounted any more, safe to unplug")
+            return
+        ok, message = unmount_device(device)
+        if ok:
+            self.toast.emit("info", f"{label}: safe to unplug")
+            self._notify_safe_to_unplug(label, str(message or ""))
+        else:
+            self.toast.emit(
+                "warning",
+                f"{label}: could not be unmounted ({message or 'busy'}); close anything using it",
+            )
+        self.refreshDevices()
+
+    @staticmethod
+    def _notify_safe_to_unplug(label: str, detail: str) -> None:
+        """A desktop notification without buttons: there is nothing to click."""
+        try:
+            notifier = build_notifier(timeout_ms=8000)
+            notifier.notify(
+                f"Safe to unplug: {label}",
+                "The job is finished and nothing is using the medium any more.",
+                actions=(),
+            )
+        except Exception as exc:  # pragma: no cover - a notifier is never required
+            log.debug("cannot show the unplug notification: %s", exc)
 
     @pyqtSlot(str)
     def _on_failed(self, message: str) -> None:
@@ -934,6 +984,20 @@ class Backend(QObject):
         target = path if os.path.isdir(path) else os.path.dirname(path)
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(target)):
             self.toast.emit("error", f"Could not open {target}")
+
+    @pyqtSlot(str)
+    def openFolder(self, path: str) -> None:
+        """Select a folder (a mounted medium, from a Dolphin service menu)."""
+        if not path:
+            return
+        folder = path
+        if folder.startswith("file:"):
+            folder = QUrl(folder).toLocalFile()
+        if not os.path.isdir(folder):
+            self.toast.emit("error", f"{folder} is not a directory")
+            return
+        self.setFolder(folder)
+        self.toast.emit("info", f"Ready to triage {folder}")
 
     @pyqtSlot(str)
     def openUrl(self, url: str) -> None:
@@ -1220,6 +1284,23 @@ class Backend(QObject):
     def installState(self) -> str:
         return self._install_state
 
+    @pyqtProperty(str, notify=installStateChanged)
+    def installKind(self) -> str:
+        """What the installer dialog is running: `clamav` or `signatures`."""
+        return self._install_kind
+
+    @pyqtProperty(str, notify=settingsChanged)
+    def clamavSignatureWarning(self) -> str:
+        """The stale-signature warning of the ClamAV engine, or "" when it is fine."""
+        for status in self._engine_status:
+            if status.get("id") != "clamav":
+                continue
+            for warning in status.get("warnings") or []:
+                lowered = str(warning).lower()
+                if "signature" in lowered or "freshclam" in lowered:
+                    return str(warning)
+        return ""
+
     @pyqtProperty(bool, notify=installStateChanged)
     def installRunning(self) -> bool:
         return self._install_state == "running"
@@ -1256,6 +1337,7 @@ class Backend(QObject):
         if self._install_state == "running":
             self.toast.emit("warning", "An installation is already running")
             return
+        self._install_kind = "clamav"
         plan = build_plan(config=self.config.scan.clamav)
         if not plan.possible:
             self.toast.emit("error", plan.blocker or "nothing to install on this system")
@@ -1290,6 +1372,54 @@ class Backend(QObject):
                 self.toast.emit("warning", "Installation cancelled")
             else:
                 self.toast.emit("error", outcome.error or "the installation did not finish")
+            QTimer.singleShot(0, self.refreshEngineStatus)
+            self.installFinished.emit(outcome_data)
+
+        self._install_thread = threading.Thread(target=work, daemon=True)
+        self._install_thread.start()
+
+    @pyqtSlot()
+    def updateSignatures(self) -> None:
+        """Refresh the ClamAV database through the same plan machinery.
+
+        The interface already knows when the signatures are stale; this runs
+        `freshclam` as root (pkexec or a terminal collects the password) and
+        re-checks the engine afterwards.
+        """
+        if self._install_state == "running":
+            self.toast.emit("warning", "An installation is already running")
+            return
+        plan = build_freshclam_plan()
+        self._install_kind = "signatures"
+        self.install_model.clear()
+        self._install_outcome = {}
+        if not plan.possible:
+            self.toast.emit("error", plan.blocker or "the signatures cannot be updated here")
+            self._append_install(plan.blocker or "no plan available")
+            self._set_install_state("failed")
+            return
+        self._append_install(f"# {plan.distro} - {plan.method_label}")
+        if plan.script_path:
+            self._append_install(f"# script: {plan.script_path}")
+        self._append_install("")
+        self._set_install_state("running")
+
+        installer = Installer(plan)
+        self._installer = installer
+
+        def work() -> None:
+            outcome = installer.run(on_output=self._append_install)
+            outcome_data = outcome.to_dict()
+            outcome_data["verification"] = verify_clamav(self.config)
+            self._install_outcome = outcome_data
+            self._installer = None
+            self._set_install_state("done" if outcome.ok and not outcome.cancelled else "failed")
+            if outcome.ok:
+                self.toast.emit("info", "Signatures updated; the engine has been re-checked")
+            elif outcome.cancelled:
+                self.toast.emit("warning", "Signature update cancelled")
+            else:
+                self.toast.emit("error", outcome.error or "the signature update did not finish")
             QTimer.singleShot(0, self.refreshEngineStatus)
             self.installFinished.emit(outcome_data)
 

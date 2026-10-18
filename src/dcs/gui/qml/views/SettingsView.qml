@@ -54,6 +54,7 @@ Item {
     property bool insecureTls: false
 
     property bool keepArchive: true
+    property bool unmountAfterJob: true
     property bool confirmUpload: true
     property bool showLogPane: true
     property bool switchToResult: true
@@ -126,6 +127,7 @@ Item {
         insecureTls = s.email.insecure_tls;
 
         keepArchive = s.general.keep_archive;
+        unmountAfterJob = s.general.unmount_after_job;
         confirmUpload = s.general.confirm_before_upload;
         showLogPane = s.gui.show_log_pane;
         switchToResult = s.gui.switch_to_result;
@@ -149,6 +151,7 @@ Item {
         const payload = {
             "general": {
                 "keep_archive": keepArchive,
+                "unmount_after_job": unmountAfterJob,
                 "confirm_before_upload": confirmUpload,
                 "output_dir": outputDir
             },
@@ -403,6 +406,30 @@ Item {
                                     onClicked: backend.refreshEngineStatus()
                                 }
                             }
+                        }
+
+                        // A stale signature database is the one engine problem the
+                        // interface can fix itself, so it offers to instead of
+                        // leaving the user with a warning and a shell.
+                        Controls.Label {
+                            objectName: "signatureWarning"
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            visible: backend.clamavSignatureWarning !== ""
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.8
+                            color: Kirigami.Theme.neutralTextColor
+                            text: backend.clamavSignatureWarning
+                        }
+
+                        Controls.Button {
+                            objectName: "updateSignaturesButton"
+                            Layout.fillWidth: false
+                            visible: backend.clamavSignatureWarning !== ""
+                            text: "Update ClamAV Signatures…"
+                            icon.name: "view-refresh"
+                            enabled: backend.installState !== "running"
+                            onClicked: backend.updateSignatures()
                         }
                     }
                 }
@@ -993,6 +1020,14 @@ Item {
                                 text: "Ask before uploading a public link"
                                 checked: view.confirmUpload
                                 onToggled: view.confirmUpload = checked
+                            }
+
+                            Controls.CheckBox {
+                                objectName: "unmountAfterJobCheck"
+                                Layout.fillWidth: true
+                                text: "Unmount the medium when the job finishes, so it can be unplugged"
+                                checked: view.unmountAfterJob
+                                onToggled: view.unmountAfterJob = checked
                             }
 
                             Controls.TextField {

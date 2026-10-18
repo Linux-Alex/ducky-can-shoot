@@ -11,6 +11,7 @@ from __future__ import annotations
 import itertools
 import os
 import time
+import types
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -1371,6 +1372,112 @@ def test_the_confirmation_dialog_matches_the_job_checkboxes() -> None:
     assert "readonly property bool willEmail" in home
     # a stray unary plus once turned the whole sentence into "...NaN"
     assert "+ +" not in home
+def test_a_stale_signature_warning_is_surfaced(backend: Backend, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The settings page needs the sentence to offer the fix next to it."""
+    backend._engine_status = [
+        {
+            "id": "clamav",
+            "label": "ClamAV",
+            "available": True,
+            "version": "1.5.4",
+            "detail": "",
+            "warnings": ["ClamAV signatures are 21 days old (threshold 7); run freshclam to update them"],
+        }
+    ]
+
+    assert "21 days old" in backend.clamavSignatureWarning
+
+    backend._engine_status = [{"id": "clamav", "warnings": []}]
+    assert backend.clamavSignatureWarning == ""
+
+
+def test_opening_a_folder_selects_it(backend: Backend, qapp: Any, tmp_path: Path) -> None:
+    backend.openFolder(str(tmp_path))
+    assert backend.sourcePath == str(tmp_path)
+
+    backend.openFolder("/definitely/not/there")
+    assert backend.sourcePath == str(tmp_path), "a bad path must not clear the selection"
+
+
+def test_the_medium_is_unmounted_when_the_job_ends(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.gui import backend as backend_module
+
+    device = types.SimpleNamespace(path="/dev/sdb1", mounted=True, mount_path="/media/x")
+    unmounted: list[str] = []
+    notices: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(backend_module, "find_device", lambda node: device)
+    monkeypatch.setattr(
+        backend_module,
+        "unmount_device",
+        lambda dev: (unmounted.append(dev.path), (True, "unmounted"))[1],
+    )
+    monkeypatch.setattr(backend_module, "build_notifier", lambda **kwargs: types.SimpleNamespace(
+        notify=lambda title, body="", **kw: notices.append((title, body)) or ""
+    ))
+    backend._job_device = "/dev/sdb1"
+    backend._job_label = "SANDISK16"
+
+    backend._maybe_unmount_after_job()
+
+    assert unmounted == ["/dev/sdb1"]
+    assert notices and "Safe to unplug" in notices[0][0]
+
+
+def test_the_unmount_can_be_switched_off(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.gui import backend as backend_module
+
+    unmounted: list[str] = []
+    monkeypatch.setattr(
+        backend_module,
+        "find_device",
+        lambda node: types.SimpleNamespace(path=node, mounted=True, mount_path="/media/x"),
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "unmount_device",
+        lambda dev: (unmounted.append(dev.path), (True, "unmounted"))[1],
+    )
+    backend.config.general.unmount_after_job = False
+    backend._job_device = "/dev/sdb1"
+
+    backend._maybe_unmount_after_job()
+
+    assert unmounted == []
+
+
+def test_the_signature_update_reports_an_impossible_plan(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.core.installer import InstallPlan
+    from dcs.gui import backend as backend_module
+
+    monkeypatch.setattr(
+        backend_module,
+        "build_freshclam_plan",
+        lambda: InstallPlan(method="manual", blocker="freshclam is not installed"),
+    )
+
+    backend.updateSignatures()
+
+    assert backend.installState == "failed"
+    assert backend.installKind == "signatures"
+
+
+def test_the_settings_page_offers_the_signature_fix() -> None:
+    settings = (ROOT_QML / "views" / "SettingsView.qml").read_text(encoding="utf-8")
+
+    assert 'objectName: "updateSignaturesButton"' in settings
+    assert "Update ClamAV Signatures" in settings
+    assert "backend.clamavSignatureWarning" in settings
+    # the unmount preference travels in the draft like every other setting
+    assert "unmount_after_job" in settings
+
+
 # ---------------------------------------------------------------------------
 # updates
 # ---------------------------------------------------------------------------

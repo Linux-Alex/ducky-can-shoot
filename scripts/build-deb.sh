@@ -75,6 +75,11 @@ for size in 16 22 24 32 48 64 128 256 512; do
         "$TREE/usr/share/icons/hicolor/${size}x${size}/apps/org.kde.dcs.png"
 done
 
+say "installing the file manager actions"
+for menu in packaging/servicemenus/*.desktop; do
+    install -D -m 644 "$menu" "$TREE/usr/share/kio/servicemenus/$(basename "$menu")"
+done
+
 say "installing the man page and the documentation"
 mkdir -p "$TREE/usr/share/man/man1"
 gzip -9n -c packaging/dcs.1 > "$TREE/usr/share/man/man1/dcs.1.gz"

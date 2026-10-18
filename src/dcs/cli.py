@@ -286,6 +286,7 @@ def cmd_gui(args: argparse.Namespace) -> int:
         ["dcs"],
         config=load_config(args.config),
         device=getattr(args, "device", "") or "",
+        folder=getattr(args, "folder", "") or "",
         autorun=bool(getattr(args, "autorun", False)),
     )
 
@@ -867,6 +868,93 @@ def cmd_update(args: argparse.Namespace) -> int:
     return EXIT_CLEAN
 
 
+
+def cmd_yara(args: argparse.Namespace) -> int:
+    """Show or refresh the YARA rule pack."""
+    from dcs.core import yara_pack
+
+    if args.action == "status":
+        state = yara_pack.status()
+        if args.json:
+            print(json.dumps(state, indent=2))
+            return EXIT_CLEAN
+        if state["installed"]:
+            print(f"YARA pack: {state['rules']} rules in {state['files']} file(s)")
+            print(f"  directory: {state['directory']}")
+            print(f"  fetched  : {state['fetched'] or 'unknown'}")
+            print(f"  source   : {state['url'] or yara_pack.DEFAULT_URL}")
+        else:
+            print("No YARA pack is installed yet.")
+            print("  install one with: dcs yara update")
+            print(f"  it goes into  : {state['directory']}")
+        return EXIT_CLEAN
+
+    report = yara_pack.update(
+        url=args.url or yara_pack.DEFAULT_URL,
+        force=args.force,
+        verify=not args.no_verify,
+        on_progress=lambda line: print(f"  {line}", flush=True) if not args.json else None,
+    )
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        if report.dropped_files:
+            print(f"  dropped {len(report.dropped_files)} file(s) that do not compile, e.g. "
+                  f"{', '.join(report.dropped_files[:3])}")
+        print(report.summary())
+        if report.ok:
+            print(f"  installed in {report.directory}")
+    if report.error:
+        print(f"error: {report.error}", file=sys.stderr)
+        return EXIT_ERROR
+    return EXIT_CLEAN
+
+
+def cmd_signatures(args: argparse.Namespace) -> int:
+    """Report the ClamAV signature age, and refresh it through the plan machinery."""
+
+    from dcs.core.installer import Installer, build_freshclam_plan, plan_summary
+
+    config = load_config(args.config)
+    status = verify_clamav(config)
+    age = status.get("databaseAgeDays")
+    stale = not status.get("available") or age is None or age > config.scan.clamav.max_database_age_days
+    check = {
+        "database": status.get("database", ""),
+        "ageDays": age,
+        "maxAgeDays": config.scan.clamav.max_database_age_days,
+        "stale": stale,
+        "warning": status.get("warning", ""),
+    }
+    if args.json and not args.update:
+        print(json.dumps(check, indent=2))
+        return EXIT_CLEAN
+
+    if status.get("database"):
+        print(f"signatures: {os.path.basename(status['database'])} ({age:.0f} days old)")
+    else:
+        print("signatures: no ClamAV database found")
+    if status.get("warning"):
+        print(f"  note: {status['warning']}")
+    if not args.update:
+        print("  run 'dcs signatures --update' to refresh them" if stale else "  up to date")
+        return EXIT_THREAT if stale else EXIT_CLEAN
+
+    plan = build_freshclam_plan()
+    if args.dry_run:
+        print(plan_summary(plan))
+        return EXIT_CLEAN if plan.possible else EXIT_ERROR
+    if not plan.possible:
+        print(f"error: {plan.blocker or 'signatures cannot be updated here'}", file=sys.stderr)
+        return EXIT_ERROR
+    outcome = Installer(plan).run(on_output=lambda line: print(f"  {line}", flush=True))
+    if not outcome.ok:
+        print(f"error: {outcome.error or 'freshclam failed'}", file=sys.stderr)
+        return EXIT_ERROR
+    print("signatures updated")
+    return EXIT_CLEAN
+
+
 def cmd_install_clamav(args: argparse.Namespace) -> int:
     """Install the optional ClamAV engine through the system package manager.
 
@@ -961,6 +1049,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     gui = subparsers.add_parser("gui", help="start the graphical interface (default)")
     gui.add_argument("--device", help="open the interface on this medium (mounted if needed)")
+    gui.add_argument(
+        "--folder",
+        help="open the interface with this folder (a mounted medium) already selected",
+    )
     gui.add_argument(
         "--autorun",
         action="store_true",
@@ -1091,6 +1183,22 @@ def build_parser() -> argparse.ArgumentParser:
     providers = subparsers.add_parser("providers", help="list the available upload providers")
     providers.add_argument("--json", action="store_true")
     providers.set_defaults(func=cmd_providers)
+
+    yara = subparsers.add_parser("yara", help="show or refresh the YARA rule pack")
+    yara.add_argument("action", choices=["status", "update"], nargs="?", default="status")
+    yara.add_argument("--url", help="rule pack tarball or zip (default: Neo23x0 signature-base)")
+    yara.add_argument("--force", action="store_true", help="refresh even when nothing changed")
+    yara.add_argument("--no-verify", action="store_true", help="install without compiling the rules")
+    yara.add_argument("--json", action="store_true")
+    yara.set_defaults(func=cmd_yara)
+
+    signatures = subparsers.add_parser(
+        "signatures", help="show the ClamAV signature age, or refresh it"
+    )
+    signatures.add_argument("--update", action="store_true", help="run freshclam (asks for a password)")
+    signatures.add_argument("--dry-run", action="store_true", help="print the plan, run nothing")
+    signatures.add_argument("--json", action="store_true")
+    signatures.set_defaults(func=cmd_signatures)
 
     update = subparsers.add_parser(
         "update",

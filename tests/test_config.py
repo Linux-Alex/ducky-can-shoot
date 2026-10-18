@@ -105,6 +105,7 @@ def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
     assert set(data["general"]) == {
         "confirm_before_upload",
         "keep_archive",
+        "unmount_after_job",
         "output_dir",
         "ui_refresh_ms",
     }

@@ -86,6 +86,15 @@ for size in 16 22 24 32 48 64 128 256 512; do
     install -m 644 "packaging/icons/hicolor/${size}x${size}/apps/org.kde.dcs.png" \
         "$ICONROOT/${size}x${size}/apps/org.kde.dcs.png"
 done
+
+# File manager actions: "Scan with Ducky Can Shoot" on a folder, "Open in
+# Ducky Can Shoot" on a device node. They are what puts the tool where the
+# medium already is.
+MENUDIR="${XDG_DATA_HOME:-$HOME/.local/share}/kio/servicemenus"
+install -d "$MENUDIR"
+for menu in packaging/servicemenus/*.desktop; do
+    install -m 644 "$menu" "$MENUDIR/$(basename "$menu")"
+done
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPDIR" || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "$ICONROOT" 2>/dev/null || true
 

@@ -6,6 +6,21 @@ shows what the pipeline is doing.
 
 [Back to the README](../README.md)
 
+### "Scan with Ducky Can Shoot" does not appear in Dolphin
+
+The menu comes from a KIO service menu file, so the desktop has to reload it
+after an install:
+
+```bash
+ls /usr/share/kio/servicemenus/dcs-*.desktop ~/.local/share/kio/servicemenus/dcs-*.desktop
+kbuildsycoca6 --noincremental
+```
+
+If the files are there but the entry is still missing, restart Dolphin - the menu
+is read when the file manager starts. The action is offered on **folders**, so a
+medium that is mounted (which is what Kubuntu does by default) is a folder like
+any other; on a device node it appears as **Open in Ducky Can Shoot** instead.
+
 ### The notification appears and vanishes about a second later
 
 The toast flashes up when the medium is plugged in and is gone before it can be

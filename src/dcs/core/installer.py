@@ -547,6 +547,89 @@ def build_plan(
     return plan
 
 
+
+def _writable_database_dir() -> str:
+    """The first DCS_CLAMAV_DB entry that can be written to, creating it if needed."""
+    override = os.environ.get("DCS_CLAMAV_DB", "").strip()
+    if not override:
+        return ""
+    for candidate in override.split(os.pathsep):
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+        except OSError:
+            continue
+        if os.access(candidate, os.W_OK):
+            return candidate
+    return ""
+
+
+def build_freshclam_plan(
+    *,
+    cache_dir: str | None = None,
+    write_script: bool = True,
+    prefer: str = "auto",
+) -> InstallPlan:
+    """A plan that refreshes the ClamAV signature database.
+
+    `freshclam` writes into /var/lib/clamav, so it needs the same root
+    privileges the package install does - and the same privilege machinery
+    collects the password.  The daemon is reloaded afterwards, because clamd
+    keeps the database it loaded at start and would otherwise keep matching
+    against yesterday's signatures.
+    """
+    plan = InstallPlan(distro=distro_name())
+    if shutil.which("freshclam") is None:
+        plan.blocker = (
+            "freshclam is not installed (it comes with the clamav package; "
+            "use 'dcs install-clamav' first)"
+        )
+        plan.method = "manual"
+        return plan
+
+    # The AppImage keeps its database inside the image, so the update writes
+    # there: no root, no password, and no mixing with a database the image would
+    # never read.
+    datadir = _writable_database_dir()
+    if datadir:
+        plan.steps = [
+            InstallStep(
+                title=f"refresh the signatures in {datadir}",
+                argv=("freshclam", f"--datadir={datadir}", "--stdout"),
+            )
+        ]
+        plan.method = "direct"
+        plan.method_label = "no password needed (the database belongs to this application)"
+    else:
+        plan.steps = [
+            InstallStep(title="refresh the ClamAV signatures", argv=("freshclam", "--stdout"))
+        ]
+        if shutil.which("systemctl") is not None:
+            plan.steps.append(
+                InstallStep(
+                    title="reload clamd so it uses the new database",
+                    argv=("systemctl", "try-reload-or-restart", "clamav-daemon"),
+                    optional=True,
+                )
+            )
+        choose_method(plan, prefer)
+    plan.script = render_script(plan.steps, distro=plan.distro, title="signature update plan")
+
+    if write_script and plan.steps:
+        directory = cache_dir or os.path.join(
+            os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"),
+            "dcs",
+        )
+        path = os.path.join(directory, f"update-signatures-{time.strftime('%Y%m%d-%H%M%S')}.sh")
+        try:
+            os.makedirs(directory, exist_ok=True)
+            atomic_write_text(path, plan.script, mode=0o700)
+            plan.script_path = path
+        except OSError as exc:
+            log.warning("could not write the signature update script: %s", exc)
+            plan.warnings.append(f"the script could not be saved to {directory}: {exc}")
+    return plan
 def manual_instructions(plan: InstallPlan) -> str:
     """Copy-paste instructions for a machine where DCS cannot help."""
     if not plan.steps:
@@ -565,6 +648,9 @@ def _argv_for(plan: InstallPlan, script_path: str, *, python: str = "bash") -> l
     """The full command line that runs the generated script."""
     if plan.method == "root":
         return [python, script_path]
+    if plan.method == "direct":
+        # nothing here needs root (a database inside the application, for one)
+        return ["bash", script_path]
     if plan.method == "pkexec":
         return ["pkexec", "/bin/bash", script_path]
     if plan.method == "terminal":

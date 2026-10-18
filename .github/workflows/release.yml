@@ -20,6 +20,10 @@ on:
 
 permissions:
   contents: write
+  # the build provenance attestation: the workflow has to be able to ask GitHub
+  # to sign a statement about the artefacts it produced
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -86,8 +90,49 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  appimage:
+    # The image bundles Python, Qt, Kirigami and ClamAV, so it is built on the
+    # distribution those come from: before 26.04 there is no Kirigami 6 for Qt 6.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install what the image will bundle
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 python3-pyqt6 python3-pyqt6.qtqml python3-pyqt6.qtquick \
+            python3-requests qml6-module-org-kde-kirigami qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-dialogs \
+            qml6-module-qtquick-templates qml6-module-qtqml-workerscript \
+            qt6-svg-plugins libqt6svg6 clamav curl ca-certificates tar binutils file
+
+      - name: Build the AppImage
+        run: ./scripts/build-appimage.sh
+
+      - name: Run it on a machine that has nothing installed
+        run: |
+          # The point of the image is that it needs none of the packages above,
+          # so it is run in a bare container: no Python, no Qt, no ClamAV.
+          docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:26.04 bash -lc '
+            set -e
+            /dist/DuckyCanShoot-*.AppImage --appimage-extract-and-run --version
+            /dist/DuckyCanShoot-*.AppImage --appimage-extract-and-run engines
+            mkdir -p /tmp/stick
+            printf "X5O!P%%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*" > /tmp/stick/eicar.com
+            /dist/DuckyCanShoot-*.AppImage --appimage-extract-and-run scan /tmp/stick
+          ' | tee appimage-smoke.txt
+          grep -q "EICAR" appimage-smoke.txt || { echo "the bundled database did not detect EICAR"; exit 1; }
+
+      - name: Store the AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, appimage]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -98,11 +143,35 @@ jobs:
           name: dist
           path: dist
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: appimage
+          path: dist
+
       # The notes are built by the script, never by appending a shell heredoc: a
       # heredoc runs command substitutions, which turned the code fences of the
       # first two releases into the output of "apt install" and "pip install".
       - name: Write the release notes for this tag
         run: python3 scripts/changelog-for-tag.py "${GITHUB_REF_NAME}" --output release-notes.md
+
+      - name: Write the checksum file
+        run: |
+          cd dist
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # A statement, signed by GitHub, that these exact files were produced by
+      # this workflow from this commit.  It is what turns "trust the download"
+      # into "check the attestation".
+      - name: Attest the artefacts
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.AppImage
 
       - name: Create the release
         env:

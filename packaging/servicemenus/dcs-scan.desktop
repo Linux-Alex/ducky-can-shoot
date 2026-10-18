@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+Actions=scan;
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-Priority=TopLevel
+Icon=org.kde.dcs
+Name=Scan with Ducky Can Shoot
+
+[Desktop Action scan]
+Name=Scan with Ducky Can Shoot
+Icon=media-playback-start
+Exec=dcs gui --folder %f

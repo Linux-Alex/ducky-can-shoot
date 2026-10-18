@@ -1,0 +1,31 @@
+#!/bin/sh
+# AppRun: the entry point of the AppImage.
+#
+# Everything the application needs is inside the image - Python, Qt, Kirigami,
+# ClamAV and its signature database - so this script only has to point the
+# interpreter and the libraries at our own copies, and then hand over.
+HERE="$(dirname "$(readlink -f "$0")")"
+
+export APPDIR="$HERE"
+export LD_LIBRARY_PATH="$HERE/usr/lib/x86_64-linux-gnu:$HERE/usr/lib:$LD_LIBRARY_PATH"
+export PYTHONHOME="$HERE/usr"
+export PYTHONPATH="$HERE/usr/lib/dcs-python:$HERE/usr/lib/python3/dist-packages"
+export QT_PLUGIN_PATH="$HERE/usr/lib/x86_64-linux-gnu/qt6/plugins"
+export QML2_IMPORT_PATH="$HERE/usr/lib/x86_64-linux-gnu/qt6/qml"
+export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export PATH="$HERE/usr/bin:$PATH"
+# ClamAV: the database inside the image is read only, so an updated one (from
+# "Update ClamAV Signatures") goes to the user's data directory instead.  The
+# engine takes whichever is newer; the bundled copy is the fallback.
+export DCS_CLAMAV_DB="${XDG_DATA_HOME:-$HOME/.local/share}/dcs/clamav-db:$HERE/usr/share/dcs/clamav"
+# There is no clamd inside the image, so do not look for one or warn about it.
+export DCS_CLAMAV_DAEMON=no
+# Without this Qt looks for a platform theme the host may not have; the image
+# carries the Breeze integration, and "kde" falls back cleanly on a bare system.
+export QT_QPA_PLATFORMTHEME="${QT_QPA_PLATFORMTHEME:-kde}"
+
+PYTHON="$HERE/usr/bin/python3"
+[ -x "$PYTHON" ] || PYTHON="$(cd "$HERE/usr/bin" && ls python3.[0-9]* 2>/dev/null | head -1)"
+[ -n "$PYTHON" ] || PYTHON="$HERE/usr/bin/python3.14"
+
+exec "$PYTHON" -s -m dcs "$@"

@@ -128,6 +128,7 @@ def run_gui(
     *,
     config: AppConfig | None = None,
     device: str = "",
+    folder: str = "",
     autorun: bool = False,
 ) -> int:
     """Entry point used by the dcs-gui script and by 'dcs' without arguments.
@@ -207,6 +208,10 @@ def run_gui(
 
     if device:
         QTimer.singleShot(0, lambda: backend.openDevice(device, autorun=autorun))
+    elif folder:
+        # "Scan with Ducky Can Shoot" from a file manager: a mounted medium is a
+        # folder like any other, and the window opens with it already selected
+        QTimer.singleShot(0, lambda: backend.openFolder(folder))
 
     # The update check is a read-only request to GitHub, made after the window is
     # up so a slow network never delays the start.  It is skipped entirely when

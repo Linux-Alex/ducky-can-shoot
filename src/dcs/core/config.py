@@ -83,6 +83,8 @@ class GeneralConfig:
     confirm_before_upload: bool = True
     #: keep the local archive after a successful upload
     keep_archive: bool = True
+    #: unmount the medium when the job finishes, so it can be unplugged safely
+    unmount_after_job: bool = True
     #: directory for archives, reports and work files ("" = XDG default)
     output_dir: str = ""
     #: UI refresh interval for the live view, milliseconds

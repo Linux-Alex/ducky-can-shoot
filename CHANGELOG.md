@@ -8,7 +8,41 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Dolphin actions.** A KIO service menu installs two entries: **Scan with
+  Ducky Can Shoot** on any folder (a mounted medium is a folder) and **Open in
+  Ducky Can Shoot** on a device node. Both open the interface with the medium
+  already selected (`dcs gui --folder`, `dcs gui --device`), so the tool sits
+  where the medium already is instead of being an app you have to remember.
+
+- **The stale-signature warning is actionable.** When ClamAV's database is
+  older than `scan.clamav.max_database_age_days`, the settings page says which
+  warning it is and offers **Update ClamAV Signatures…**, which runs `freshclam`
+  through the same plan/pkexec machinery the installer uses and reloads `clamd`.
+  `dcs signatures [--update] [--dry-run]` does the same on the command line.
+
+- **"Safe to unplug".** When a job finishes the medium is unmounted through
+  udisks2 and a notification says it can be taken out.
+  `general.unmount_after_job` (default on) and a checkbox in the settings page
+  control it.
+
+- **`dcs yara update`.** Downloads a YARA rule pack (Neo23x0's signature-base by
+  default) into `~/.local/share/dcs/yara/signature-base`, compile-checks every
+  rule file with the local `yara` binary, drops the files that do not compile
+  (one bad file makes YARA abort the whole run) and reports which rules
+  appeared, changed or went away. `dcs yara status` shows what is installed.
+
+- **A self-contained AppImage.** `scripts/build-appimage.sh` assembles one file
+  with Python, Qt, Kirigami, ClamAV and a signature database inside it, and the
+  release workflow runs it in a bare `ubuntu:26.04` container that has none of
+  those, scanning an EICAR sample. "Update ClamAV Signatures" writes to the
+  user's data directory when the bundled database is read-only, and the engine
+  uses whichever copy is newer.
+
+- **Verifiable artefacts.** Every release carries `SHA256SUMS` and a signed
+  build provenance attestation, so `gh attestation verify <file> -R
+  Linux-Alex/ducky-can-shoot` says which workflow and commit produced it.
 
 ## [0.2.3] - 2026-10-18
 

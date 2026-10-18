@@ -16,11 +16,12 @@ Global options, valid for every subcommand:
 
 Running `dcs` with no subcommand is the same as `dcs gui`.
 
-### `dcs gui [--device NODE] [--autorun]`
+### `dcs gui [--device NODE] [--folder DIR] [--autorun]`
 
 | Option | Meaning |
 | --- | --- |
 | `--device NODE` | Open the interface on this medium (`/dev/sdb1`, a label or a mount point) and mount it if needed. |
+| `--folder DIR` | Open the interface with this folder already selected. This is what the **Scan with Ducky Can Shoot** action in Dolphin runs. |
 | `--autorun` | Start the job on that medium as soon as the window is up. Used by `dcs watch` in `open_run` mode. |
 
 Starts the graphical interface. If PyQt6 is missing, the command explains what to
@@ -96,6 +97,49 @@ dcs run --path /mnt/stick --no-upload --no-email --json | jq .verdict
 
 Exit code: 0 clean, 1 suspicious or infected, 2 error or cancelled.
 
+### `dcs yara [status|update] [--url URL] [--force] [--no-verify] [--json]`
+
+Shows or refreshes the YARA rule pack. `status` prints how many rules are
+installed and where they came from; `update` downloads a pack (Neo23x0's
+signature-base by default) into `~/.local/share/dcs/yara/signature-base`, where
+the `yara` engine already looks for rules.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--url URL` | signature-base master tarball | Any `.tar.gz` or `.zip` of `.yar`/`.yara` files. |
+| `--force` | off | Reinstall even when nothing changed. |
+| `--no-verify` | off | Skip the compile check. Only useful when `yara` is not installed. |
+| `--json` | off | Print the report (added/changed/removed rules) as JSON. |
+
+Every rule file is compiled with your `yara` binary before anything is
+replaced. A file that does not compile is left out (and named), because one bad
+rule file makes YARA abort the whole run - a pack that breaks the engine is
+worse than no pack.
+
+```bash
+dcs yara status                     # what is installed right now
+dcs yara update                     # fetch, compile-check, install
+dcs yara update --url ./my-rules.tar.gz
+```
+
+### `dcs signatures [--update] [--dry-run] [--json]`
+
+Prints the age of the ClamAV signature database and, with `--update`, refreshes
+it with `freshclam`. That writes into `/var/lib/clamav`, so it asks for your
+password through the same helper the installer uses (pkexec or a terminal), and
+the running `clamd` is reloaded afterwards.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--update` | off | Run `freshclam` and reload the daemon. |
+| `--dry-run` | off | Print the plan (and its script) without running it. |
+| `--json` | off | Print the database path, age and threshold as JSON. |
+
+```bash
+dcs signatures                      # how old are the signatures?
+dcs signatures --update --dry-run   # what would happen
+dcs signatures --update             # do it
+```
 ### `dcs update [--check] [--yes] [--json]`
 
 Asks GitHub for the newest published release and compares it with the copy
