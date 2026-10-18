@@ -79,10 +79,12 @@ def test_without_a_binary_the_engine_is_unavailable(monkeypatch: pytest.MonkeyPa
     assert "not installed" in result.problem
 
 
-def test_yara_x_is_reported_instead_of_run_blindly(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yara_x_is_reported_instead_of_run_blindly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """yr has its own command line; running it with yara's flags would report
     an empty pass as coverage, which is worse than saying what is missing."""
-    fake = FAKES / "yara-x-would-be"
+    fake = tmp_path / "yr"
     fake.write_text("#!/bin/sh\necho 'YARA-X 1.0.0'\n")
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", str(FAKES) + os.pathsep + "/usr/bin:/bin")
