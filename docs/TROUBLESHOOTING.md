@@ -6,6 +6,43 @@ shows what the pipeline is doing.
 
 [Back to the README](../README.md)
 
+### The notification appears and vanishes about a second later
+
+The toast flashes up when the medium is plugged in and is gone before it can be
+read - and the medium was mounted by the desktop in the meantime, which makes it
+look like the auto-mount is the cause. It is not.
+
+A freedesktop notification that carries an **action** belongs to the client
+connection that sent it: when that connection closes, the notification service
+withdraws the notification. DCS used to send it with a one-shot `gdbus call`,
+which exits immediately, so Plasma showed the toast and took it down again about
+a second later.
+
+DCS therefore keeps one connection open for as long as the notification is on
+screen (PyGObject's Gio, `python3-gi`). On a machine without it, DCS falls back
+to the `gdbus` call and the toast may still be short-lived there:
+
+```bash
+dcs watch --test        # says which mechanism is used, and whether the button works
+```
+
+```text
+sending a test notification through GioNotifier   <- the connection stays open
+answer: the button works
+```
+
+If it prints `DbusNotifier` instead, install the binding:
+
+```bash
+sudo apt install python3-gi        # Debian, Ubuntu, Kubuntu, Mint
+sudo dnf install python3-gobject   # Fedora
+sudo pacman -S python-gobject      # Arch
+```
+
+The same thing happens the other way round in the **GUI**: while the window is
+in the foreground DCS shows its own banner instead of a system notification, so
+that is where the button lives then.
+
 ### The USB watcher does not do anything
 
 The watcher is off by default, and three things have to line up:

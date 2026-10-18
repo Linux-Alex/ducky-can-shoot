@@ -22,6 +22,7 @@ import subprocess
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from dcs.core.log import get_logger
 from dcs.version import APP_ID, APP_NAME
@@ -52,6 +53,186 @@ def _quote(text: str) -> str:
     """A single quoted GVariant string."""
     return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
+
+
+def _load_gi() -> tuple[Any, Any] | None:
+    """Import Gio and GLib, or None when PyGObject is not installed."""
+    try:
+        import importlib
+
+        gio = importlib.import_module("gi.repository.Gio")
+        glib = importlib.import_module("gi.repository.GLib")
+    except Exception:
+        return None
+    return gio, glib
+
+
+@dataclass
+class GioNotifier:
+    """Notifications over one long-lived Gio connection.
+
+    The connection stays open while the notification is on screen, which is what
+    keeps it alive: the notification service withdraws action notifications whose
+    sending client has gone away, and a one-shot tool like "gdbus call" is
+    exactly such a client.
+    """
+
+    app_name: str = APP_NAME
+    icon: str = APP_ID
+    timeout_ms: int = 20000
+    urgency: str = "normal"
+    resident: bool = True
+    #: injectable for the tests: returns (Gio, GLib) or None
+    loader: Callable[[], tuple[Any, Any] | None] = field(default=_load_gi)
+
+    last_id: int = field(default=0, init=False)
+
+    def _libs(self) -> tuple[Any, Any] | None:
+        try:
+            return self.loader()
+        except Exception:
+            return None
+
+    def available(self) -> bool:
+        libs = self._libs()
+        if libs is None:
+            return False
+        gio, _glib = libs
+        try:
+            gio.bus_get_sync(gio.BusType.SESSION, None)
+        except Exception:
+            return False
+        return True
+
+    def gio_args(
+        self, title: str, body: str, actions: Sequence[tuple[str, str]]
+    ) -> tuple[Any, ...]:
+        """The Notify argument tuple, in the order the interface expects."""
+        flat: list[str] = []
+        for name, label in actions:
+            flat += [name, label]
+        return (
+            self.app_name,
+            0,  # no notification to replace
+            self.icon,
+            title,
+            body or title,
+            flat,
+            self._hints(),
+            int(self.timeout_ms),
+        )
+
+    def _hints(self) -> dict[str, Any]:
+        libs = self._libs() or (None, None)
+        _gio, glib = libs
+        hints: dict[str, Any] = {}
+        if glib is None:
+            return hints
+        hints["urgency"] = glib.Variant("y", URGENCY.get(self.urgency, 1))
+        if self.resident:
+            hints["resident"] = glib.Variant("b", True)
+        return hints
+
+    def notify(
+        self,
+        title: str,
+        body: str = "",
+        *,
+        actions: Sequence[tuple[str, str]] = ((ACTION_OPEN, "Open Ducky Can Shoot"),),
+    ) -> str:
+        """Show the notification and return the action the user picked."""
+        libs = self._libs()
+        if libs is None:
+            return ""
+        gio, glib = libs
+        # A private main context, so pumping it here cannot disturb a Qt or
+        # GLib loop that is running in another thread of the same process.
+        context = glib.MainContext.new()
+        context.push_thread_default()
+        events: list[tuple[str, tuple[Any, ...]]] = []
+        connection = None
+        subscription = 0
+        try:
+            connection = gio.bus_get_sync(gio.BusType.SESSION, None)
+            subscription = connection.signal_subscribe(
+                None,
+                INTERFACE,
+                None,
+                OBJECT_PATH,
+                None,
+                gio.DBusSignalFlags.NONE,
+                lambda *args: events.append((args[4], tuple(args[5].unpack()))),
+            )
+            reply = connection.call_sync(
+                INTERFACE,
+                OBJECT_PATH,
+                INTERFACE,
+                "Notify",
+                glib.Variant("(susssasa{sv}i)", self.gio_args(title, body, actions)),
+                None,
+                gio.DBusCallFlags.NONE,
+                10000,
+                None,
+            )
+            self.last_id = int(reply.unpack()[0])
+            answer = self._wait(context, events, actions)
+        except Exception as exc:
+            log.warning("cannot show a notification: %s", exc)
+            return ""
+        finally:
+            if connection is not None and subscription:
+                with contextlib.suppress(Exception):
+                    connection.signal_unsubscribe(subscription)
+            context.pop_thread_default()
+        if not answer and self.last_id:
+            self.close(self.last_id)
+        return answer
+
+    def _wait(
+        self,
+        context: Any,
+        events: list[tuple[str, tuple[Any, ...]]],
+        actions: Sequence[tuple[str, str]],
+    ) -> str:
+        names = {name for name, _ in actions}
+        deadline = time.monotonic() + max(1.0, self.timeout_ms / 1000.0) + GRACE_S
+        while time.monotonic() < deadline:
+            context.iteration(False)
+            while events:
+                signal, payload = events.pop(0)
+                if signal == "ActionInvoked":
+                    notification, name = int(payload[0]), str(payload[1])
+                    if self.last_id and notification != self.last_id:
+                        continue
+                    return name if name in names else ""
+                if signal == "NotificationClosed":
+                    notification = int(payload[0])
+                    if not self.last_id or notification == self.last_id:
+                        return ""
+            time.sleep(0.02)
+        return ""
+
+    def close(self, notification_id: int) -> None:
+        """Ask the service to withdraw a notification."""
+        libs = self._libs()
+        if libs is None:
+            return
+        gio, glib = libs
+        try:
+            connection = gio.bus_get_sync(gio.BusType.SESSION, None)
+            connection.call_sync(
+                INTERFACE,
+                OBJECT_PATH,
+                INTERFACE,
+                "CloseNotification",
+                glib.Variant("(u)", (int(notification_id),)),
+                None,
+                gio.DBusCallFlags.NONE,
+                5000,
+                None,
+            )
+        except Exception as exc:
+            log.debug("cannot close notification %s: %s", notification_id, exc)
 
 @dataclass
 class DbusNotifier:

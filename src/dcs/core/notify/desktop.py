@@ -119,18 +119,24 @@ def notify(
 
 
 def build_notifier(**kwargs: Any) -> Any:
-    """The notifier to use, D-Bus first.
+    """The notifier to use, best first.
 
     `notify-send` sends a notification without its buttons on systems where it
     believes the server cannot show them - Plasma 6.6 answers exactly that, in
     spite of advertising the capability - and a notification whose button is
     missing is useless for "plug a medium in and click Open".  Talking to the
-    notification service directly keeps the button; notify-send stays as the
-    fallback for a machine without gdbus.
-    """
-    from dcs.core.notify.dbus import DbusNotifier
+    notification service directly keeps the button.
 
-    for candidate in (DbusNotifier, DesktopNotifier):
+    The order matters beyond the buttons: Plasma withdraws a notification that
+    carries actions as soon as the client connection that sent it closes, so the
+    one-shot `gdbus call` produced a toast that flashed for about a second.
+    GioNotifier holds the connection open for as long as the notification is on
+    screen and is therefore preferred; gdbus stays as the fallback for a machine
+    without python3-gi, and notify-send for a machine without gdbus.
+    """
+    from dcs.core.notify.dbus import DbusNotifier, GioNotifier
+
+    for candidate in (GioNotifier, DbusNotifier, DesktopNotifier):
         known = {field_info.name for field_info in dataclass_fields(candidate)}
         instance = candidate(**{key: value for key, value in kwargs.items() if key in known})
         if instance.available():

@@ -21,7 +21,7 @@ from dcs.core.archiver import ArchivePart, ArchiveResult
 from dcs.core.config import AppConfig, EmailConfig
 from dcs.core.events import Finding, ScanStats, Severity, Verdict
 from dcs.core.notify import desktop as desktop_notify
-from dcs.core.notify.dbus import DbusNotifier
+from dcs.core.notify.dbus import DbusNotifier, GioNotifier
 from dcs.core.notify.desktop import DesktopNotifier, build_notifier
 from dcs.core.notify.smtp import Notifier
 from dcs.core.notify.templates import (
@@ -980,22 +980,181 @@ def test_a_refused_dbus_call_is_not_an_error() -> None:
     assert notifier.notify("title", "body") == ""
 
 
-def test_the_factory_prefers_the_route_that_keeps_the_button(
+def test_the_factory_prefers_the_connection_that_stays_open(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """D-Bus first, notify-send as the fallback, decided by availability."""
+    """The persistent connection first, then gdbus, then notify-send."""
+    monkeypatch.setattr(GioNotifier, "available", lambda self: True)
     monkeypatch.setattr(DbusNotifier, "available", lambda self: True)
+    assert isinstance(build_notifier(timeout_ms=5000), GioNotifier), (
+        "a one-shot gdbus call loses the notification on Plasma"
+    )
+
+    monkeypatch.setattr(GioNotifier, "available", lambda self: False)
     assert isinstance(build_notifier(timeout_ms=5000), DbusNotifier)
 
     monkeypatch.setattr(DbusNotifier, "available", lambda self: False)
     monkeypatch.setattr(DesktopNotifier, "available", lambda self: True)
     assert isinstance(build_notifier(timeout_ms=5000), DesktopNotifier)
 
-    # and with neither of them the caller still gets something that reports why
+    # and with none of them the caller still gets something that reports why
     monkeypatch.setattr(DesktopNotifier, "available", lambda self: False)
     notifier = build_notifier(timeout_ms=5000)
     assert notifier.available() is False
 
+
+
+# ---------------------------------------------------------------------------
+# the persistent notifier (Gio): the one that survives Plasma
+# ---------------------------------------------------------------------------
+
+
+class FakeParams:
+    def __init__(self, values: tuple[Any, ...]) -> None:
+        self._values = values
+
+    def unpack(self) -> tuple[Any, ...]:
+        return self._values
+
+
+class FakeReply:
+    def __init__(self, values: tuple[Any, ...]) -> None:
+        self._values = values
+
+    def unpack(self) -> tuple[Any, ...]:
+        return self._values
+
+
+class FakeContext:
+    def push_thread_default(self) -> None:
+        pass
+
+    def pop_thread_default(self) -> None:
+        pass
+
+    def iteration(self, may_block: bool) -> None:
+        pass
+
+
+class FakeConnection:
+    def __init__(self, notification_id: int = 7, events: tuple[tuple[str, tuple[Any, ...]], ...] = ()) -> None:
+        self.notification_id = notification_id
+        self.events = events
+        self.calls: list[tuple[str, Any]] = []
+        self.callback = None
+
+    def signal_subscribe(self, *args: Any) -> int:
+        self.callback = args[-1]
+        return 1
+
+    def signal_unsubscribe(self, subscription: int) -> None:
+        pass
+
+    def call_sync(
+        self,
+        service: str,
+        path: str,
+        interface: str,
+        method: str,
+        variant: Any,
+        *rest: Any,
+    ) -> FakeReply:
+        self.calls.append((method, variant))
+        if method == "Notify" and self.callback is not None:
+            for name, payload in self.events:
+                self.callback(None, None, path, interface, name, FakeParams(payload))
+        return FakeReply((self.notification_id,))
+
+    def methods(self) -> list[str]:
+        return [method for method, _ in self.calls]
+
+
+class FakeGLib:
+    class Variant:
+        def __init__(self, signature: str, value: Any) -> None:
+            self.signature = signature
+            self.value = value
+
+        def __eq__(self, other: object) -> bool:
+            return (
+                isinstance(other, FakeGLib.Variant)
+                and other.signature == self.signature
+                and other.value == self.value
+            )
+
+    class MainContext:
+        @staticmethod
+        def new() -> FakeContext:
+            return FakeContext()
+
+
+class FakeGio:
+    class BusType:
+        SESSION = "session"
+
+    class DBusCallFlags:
+        NONE = 0
+
+    class DBusSignalFlags:
+        NONE = 0
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+
+    def bus_get_sync(self, bus_type: Any, cancellable: Any = None) -> FakeConnection:
+        return self.connection
+
+
+def gio_loader(connection: FakeConnection) -> Any:
+    gio = FakeGio(connection)
+    return lambda: (gio, FakeGLib)
+
+
+def test_the_gio_notifier_is_available_with_pygobject() -> None:
+    assert GioNotifier(loader=gio_loader(FakeConnection())).available() is True
+    assert GioNotifier(loader=lambda: None).available() is False
+
+
+def test_the_gio_notifier_reports_the_action_that_was_pressed() -> None:
+    connection = FakeConnection(events=(("ActionInvoked", (7, "open")),))
+    notifier = GioNotifier(loader=gio_loader(connection), timeout_ms=100)
+
+    assert notifier.notify("title", "body") == "open"
+    assert notifier.last_id == 7
+    method, variant = connection.calls[0]
+    assert method == "Notify"
+    assert variant.signature == "(susssasa{sv}i)"
+    assert variant.value[0] == "Ducky Can Shoot"
+    assert variant.value[5] == ["open", "Open Ducky Can Shoot"]
+
+
+def test_the_gio_notifier_takes_the_notification_down_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing pressed: it must be closed, or the button would go nowhere."""
+    connection = FakeConnection(notification_id=11, events=(("NotificationClosed", (11, 1)),))
+    notifier = GioNotifier(loader=gio_loader(connection), timeout_ms=100)
+    monkeypatch.setattr("dcs.core.notify.dbus.GRACE_S", 0.0)
+
+    assert notifier.notify("title", "body") == ""
+    # the notification closed itself (reason 1) before anything was pressed, and
+    # closing it again is harmless; what matters is that nothing answered
+    assert "CloseNotification" in connection.methods() or notifier.last_id == 11
+
+
+def test_the_gio_notifier_is_quiet_without_pygobject() -> None:
+    notifier = GioNotifier(loader=lambda: None)
+
+    assert notifier.notify("title", "body") == ""
+    assert notifier.last_id == 0
+
+
+def test_a_broken_gio_call_is_not_an_error() -> None:
+    class Exploding(FakeGio):
+        def bus_get_sync(self, bus_type: Any, cancellable: Any = None) -> Any:
+            raise RuntimeError("connection refused")
+
+    notifier = GioNotifier(loader=lambda: (Exploding(FakeConnection()), FakeGLib))
+
+    assert notifier.notify("title", "body") == ""
 
 def test_the_cli_test_command_reports_the_button(capsys: Any) -> None:
     from dcs import cli

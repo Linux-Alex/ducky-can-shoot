@@ -371,7 +371,15 @@ def _watch_test_notification(notifier: Any) -> int:
         print("answer: the button works")
         return EXIT_CLEAN
     print("answer: no button press was received")
-    if kind == "DesktopNotifier":
+    if kind == "DbusNotifier":
+        print(
+            "note: this machine has no python3-gi, so DCS sent the notification with a "
+            "one-shot gdbus call. Plasma withdraws such notifications as soon as the "
+            "call exits, which looks like a toast that flashes for a second; install "
+            "python3-gi for the connection that stays open.",
+            file=sys.stderr,
+        )
+    elif kind == "DesktopNotifier":
         print(
             "note: notify-send is showing this notification without its buttons. "
             "Install gdbus (glib2) so the button appears, or use watch.mode open.",

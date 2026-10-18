@@ -8,6 +8,20 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The notification that appeared when a medium was plugged in vanished about
+  a second later.** A freedesktop notification that carries an action belongs to
+  the client connection that sent it, and Plasma withdraws it when that
+  connection closes - which a one-shot `gdbus call` does immediately. DCS now
+  sends the notification over one long-lived Gio connection (PyGObject,
+  `python3-gi`) and keeps it open while the toast is on screen, so the button
+  works and the toast stays for `watch.notify_timeout_ms`. The `gdbus` path and
+  `notify-send` stay as fallbacks for machines without the binding, `dcs watch
+  --test` now says which one is in use and what to install, and
+  `docs/TROUBLESHOOTING.md` has the whole story. Kubuntu's auto-mount was not
+  involved.
+
 ### Added
 
 - **Update checks, and installing the update from the settings page.** DCS asks
