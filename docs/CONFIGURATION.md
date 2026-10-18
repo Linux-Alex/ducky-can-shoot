@@ -101,7 +101,9 @@ without having looked at a single pattern.
 | `threads` | int | `0` | Workers YARA starts. `0` lets YARA decide from the CPU count. |
 
 A match becomes a finding that names the rule, with the tags and the
-namespace in its detail line, so the report says *why* a file matched.
+namespace in its detail line, so the report says *why* a file matched. YARA
+reads every file it is pointed at, so `scan.max_file_size_mb` does not apply to
+it; the engine's own `timeout_s` is the way to bound a pass.
 
 ### `[scan.intel]`
 
