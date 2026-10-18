@@ -25,11 +25,11 @@ test: ## Run the whole test suite (offscreen Qt)
 test-gui: ## Run only the Qt and QML tests
 	QT_QPA_PLATFORM=offscreen PYTHONPATH=$(PYTHONPATH) $(PYTEST) -q tests/test_gui.py
 
-lint: ## Check the code with ruff
-	$(RUFF) check src tests
+lint: ## Check the code with ruff (the whole tree, as CI does)
+	$(RUFF) check .
 
 format: ## Apply the safe ruff fixes
-	$(RUFF) check src tests --fix
+	$(RUFF) check . --fix
 
 build: ## Build the sdist and the wheel into dist/
 	$(PYTHON) -m build

@@ -137,11 +137,14 @@ The style is the one the code already uses; `ruff` and `mypy` enforce most of it
 Check your work before pushing:
 
 ```bash
-ruff check .
+make lint                 # ruff over the whole tree, the same check as CI
 ruff format --check .     # optional, the repo is not uniformly formatted yet
 mypy
 PYTHONPATH=src python3 -m pytest
 ```
+
+CI pins the Ruff version, so a newer release cannot turn the tree red on its
+own. To move the pin, run it yourself first: `uvx ruff@<version> check .`
 
 ## Adding a scanner rule
 

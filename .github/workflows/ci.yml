@@ -87,7 +87,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # no moving major tag here: ruff-action's releases are immutable, so the
-      # exact version is the only one that can be resolved
+      # exact version is the only one that can be resolved.  Ruff itself is
+      # pinned for the same reason: an unpinned linter once turned this job red
+      # on a file the previous release was happy with.  To move the pin, run the
+      # newer version over the tree first: uvx ruff@<version> check .
       - uses: astral-sh/ruff-action@v4.1.0
         with:
-          args: check src tests
+          version: "0.17.1"
+          args: check .

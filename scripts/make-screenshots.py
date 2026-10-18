@@ -43,9 +43,9 @@ import dcs.gui.backend as backend_module  # noqa: E402
 from dcs.core.config import load_config  # noqa: E402
 from dcs.core.device import BlockDevice  # noqa: E402
 from dcs.core.upload.base import UploadResult  # noqa: E402
-from dcs.version import APP_NAME, __version__  # noqa: E402
 from dcs.gui.app import find_qml_imports, qml_directory  # noqa: E402
 from dcs.gui.backend import Backend  # noqa: E402
+from dcs.version import APP_NAME, __version__  # noqa: E402
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 860
