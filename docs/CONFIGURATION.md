@@ -93,7 +93,7 @@ without having looked at a single pattern.
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | bool | `false` | Run the `yara` engine when it is listed in `scan.engines`. |
-| `binary` | string | `"yara"` | The binary to run. YARA-X's `yr` is tried when `yara` is missing. |
+| `binary` | string | `"yara"` | The binary to run. The classic `yara` command line is what DCS drives; YARA-X's `yr` is reported as an installation problem instead of being run with flags it does not know. |
 | `rules` | list of strings | `[]` | Rule files, or directories of `.yar`/`.yara` files, walked recursively. Empty means `$XDG_DATA_HOME/dcs/yara`, `/usr/share/yara`, `/usr/local/share/yara` and `/etc/yara`. |
 | `extra_args` | list of strings | `[]` | Extra arguments appended to the YARA invocation. |
 | `severity` | string | `"high"` | Severity of a match when the rule's tags say nothing. A rule tagged `malware`, `ransomware`, `suspicious`, `pua`, `info` and the like overrides it. |

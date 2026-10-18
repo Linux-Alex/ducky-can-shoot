@@ -344,6 +344,24 @@ def test_upload_mode_reports_what_left_the_machine(tmp_path: Path) -> None:
     assert any("uploaded 1 file(s)" in note for note in engine.notes)
 
 
+def test_a_clean_upload_is_not_repeated(tmp_path: Path) -> None:
+    """The second run must not publish the same file to the provider again."""
+    medium = tmp_path / "usb"
+    medium.mkdir()
+    (medium / "setup.exe").write_bytes(b"MZ fake")
+    uploader = FakeUploader(detections=0)
+
+    first = engine_for(tmp_path, lookup="upload", upload_unknowns=True, virustotal_api_key="k")
+    first.providers = [uploader]
+    assert run(first, medium) == []
+
+    second = engine_for(tmp_path, lookup="upload", upload_unknowns=True, virustotal_api_key="k")
+    second.providers = [uploader]
+    assert run(second, medium) == []
+
+    assert len(uploader.uploads) == 1, uploader.uploads
+
+
 def test_an_uploaded_clean_file_produces_no_finding(tmp_path: Path) -> None:
     medium = tmp_path / "usb"
     medium.mkdir()

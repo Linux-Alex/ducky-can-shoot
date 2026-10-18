@@ -113,15 +113,24 @@ def rule_files(config: YaraConfig) -> list[str]:
 def probe(config: YaraConfig) -> YaraProbe:
     """Decide whether YARA can run right now, and with which rules."""
     result = YaraProbe()
-    binary = which(config.binary) or which("yara") or which("yr")
+    binary = which(config.binary) or which("yara")
     if binary is None:
+        # YARA-X ships "yr", whose command line is not the classic one; saying so
+        # is better than running it with flags it does not know and reporting the
+        # resulting empty pass as coverage
+        if which("yr"):
+            result.problem = (
+                "only YARA-X (yr) is installed, and DCS drives the classic yara "
+                "command line: install the yara package or point scan.yara.binary at it"
+            )
+            return result
         result.problem = (
-            "YARA is not installed (install the 'yara' or 'yara-x' package, or point "
+            "YARA is not installed (install the yara package, or point "
             "scan.yara.binary at the binary)"
         )
         return result
     result.binary = binary
-    result.flavour = "yara-x" if os.path.basename(binary).startswith("yr") else "yara"
+    result.flavour = "yara"
     result.version = (tool_version(binary) or "").strip()
     result.rules = rule_files(config)
     if not result.rules:
@@ -148,11 +157,6 @@ class YaraEngine:
     # -- status -----------------------------------------------------------
     def status(self) -> EngineStatus:
         warnings: list[str] = []
-        if self.probe.usable and self.probe.flavour == "yara-x":
-            warnings.append(
-                "YARA-X is being used: rules that depend on modules it does not "
-                "implement are reported as errors instead of matching"
-            )
         if self.probe.usable and len(self.probe.rules) == 1:
             warnings.append(
                 "only one rule file is loaded; a rule pack such as Neo23x0's "

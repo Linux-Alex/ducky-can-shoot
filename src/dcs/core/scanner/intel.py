@@ -576,7 +576,10 @@ class IntelEngine:
             yield self._reputation_finding(path, size, digest, answers)
             return
 
-        if self.config.lookup == "upload" and self.config.upload_unknowns:
+        # a cache entry (even an empty one) means somebody already answered, so
+        # the file is not uploaded twice - and a clean upload is remembered as a
+        # clean answer, since re-publishing it would be pointless and rude
+        if self.config.lookup == "upload" and self.config.upload_unknowns and not answers:
             uploaded = self._upload(path, size, digest, ctx)
             if uploaded is not None:
                 yield uploaded
@@ -672,8 +675,8 @@ class IntelEngine:
             ctx.log(f"{uploader.label} upload failed: {exc}", "warning")
             return None
         self._uploaded.append({"path": path, "provider": uploader.label, "link": answer.link})
+        self.cache.put(digest, [answer])
         self.lookups += 1
         if not answer.detections:
             return None
-        self.cache.put(digest, [answer])
         return self._reputation_finding(path, size, digest, [answer])

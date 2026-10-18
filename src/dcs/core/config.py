@@ -114,7 +114,7 @@ class YaraConfig:
     """
 
     enabled: bool = False
-    #: the binary to run; YARA-X's `yr` is tried when `yara` is not installed
+    #: the binary to run (the classic `yara` command line is what DCS drives)
     binary: str = "yara"
     #: rule files, or directories of .yar/.yara files ("" = the usual places)
     rules: list[str] = field(default_factory=list)
