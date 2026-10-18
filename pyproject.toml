@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ducky-can-shoot"
-version = "0.2.1"
+version = "0.2.2"
 description = "DCS - scan a USB drive for malware, archive it, upload the image and email the verdict."
 readme = "README.md"
 requires-python = ">=3.11"

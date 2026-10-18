@@ -8,6 +8,10 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.2] - 2026-10-18
+
 ### Added
 
 - **Two optional scan engines: YARA rules and hash intelligence.**
@@ -372,7 +376,8 @@ First release. Everything below is new.
 - Nothing found on the medium is ever executed, and the medium is never written
   to.
 
-[Unreleased]: https://github.com/Linux-Alex/ducky-can-shoot/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Linux-Alex/ducky-can-shoot/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.1.0
