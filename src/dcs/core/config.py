@@ -29,6 +29,15 @@ log = get_logger("config")
 
 SYSTEM_CONFIG = "/etc/dcs/config.toml"
 
+#: every engine id `scan.engines` accepts
+ENGINE_IDS = ("clamav", "heuristic", "yara", "intel")
+
+#: how far the reputation lookups may go
+LOOKUP_MODES = ("off", "hash", "upload")
+
+#: severities, in the order the events module ranks them
+SEVERITY_NAMES = ("info", "low", "medium", "high", "critical")
+
 
 # ---------------------------------------------------------------------------
 # paths
@@ -41,6 +50,10 @@ def xdg_config_home() -> Path:
 
 def xdg_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+
+
+def xdg_cache_home() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
 
 
 def default_config_path() -> Path:
@@ -92,8 +105,71 @@ class ClamAVConfig:
 
 
 @dataclass
+class YaraConfig:
+    """YARA rules: the second signature engine, and the one whose rules are yours.
+
+    It is off by default because it needs rules to be worth anything: a YARA
+    engine with an empty rule set reports "no threats" without having looked at
+    a single pattern, which is worse than being switched off.
+    """
+
+    enabled: bool = False
+    #: the binary to run; YARA-X's `yr` is tried when `yara` is not installed
+    binary: str = "yara"
+    #: rule files, or directories of .yar/.yara files ("" = the usual places)
+    rules: list[str] = field(default_factory=list)
+    #: extra command line arguments appended to every invocation
+    extra_args: list[str] = field(default_factory=list)
+    #: a match is at least this severe unless the rule's tags say otherwise
+    severity: str = "high"
+    #: stop a pass after this many seconds (0 = no limit)
+    timeout_s: int = 0
+    #: scanning threads (0 = let YARA decide from the CPU count)
+    threads: int = 0
+
+
+@dataclass
+class IntelConfig:
+    """Known hashes: local block lists, plus optional reputation lookups.
+
+    `lookup = "off"` keeps everything on the machine.  The two online modes are
+    the only places where anything about the medium leaves it, and the upload
+    mode is the only one that sends file *contents*: it therefore has to be
+    asked for twice (`lookup = "upload"` and `upload_unknowns = true`) and
+    every uploaded file is named in the report.
+    """
+
+    #: the extra hash files below are read whenever this is on
+    enabled: bool = True
+    #: "sha256 <name>" per line, e.g. an exported MalwareBazaar or internal list
+    hash_files: list[str] = field(default_factory=list)
+    #: off | hash | upload
+    lookup: str = "off"
+    virustotal_api_key: str = ""
+    virustotal_api_key_command: str = ""
+    metadefender_api_key: str = ""
+    metadefender_api_key_command: str = ""
+    #: files larger than this are not hashed for lookups (MiB, 0 = no limit)
+    max_hash_size_mb: int = 256
+    #: stop after this many lookups in one run (0 = no limit)
+    max_lookups: int = 200
+    #: requests per minute against the providers; the free tiers are strict
+    rate_per_minute: int = 4
+    #: how long a cached answer is trusted, in hours
+    cache_ttl_hours: int = 168
+    #: where answers are cached ("" = $XDG_CACHE_HOME/dcs/intel)
+    cache_dir: str = ""
+    #: send unknown files to the providers (needs lookup = "upload")
+    upload_unknowns: bool = False
+    #: only files up to this size are uploaded (MiB)
+    upload_max_size_mb: int = 32
+    #: seconds to wait for one provider answer
+    timeout_s: int = 60
+
+
+@dataclass
 class ScanConfig:
-    #: engine ids: clamav, heuristic
+    #: engine ids: clamav, heuristic, yara, intel
     engines: list[str] = field(default_factory=lambda: ["clamav", "heuristic"])
     #: skip scanning individual files larger than this (MiB); 0 = no limit
     max_file_size_mb: int = 4096
@@ -113,6 +189,8 @@ class ScanConfig:
     #: (PUA/adware are reported but do not block the upload by default)
     blocking_severity: str = "high"
     clamav: ClamAVConfig = field(default_factory=ClamAVConfig)
+    yara: YaraConfig = field(default_factory=YaraConfig)
+    intel: IntelConfig = field(default_factory=IntelConfig)
 
 
 @dataclass
@@ -300,25 +378,7 @@ class AppConfig:
 
     # -- secret resolution ------------------------------------------------
     def resolve_secret(self, value: str, command: str, env_var: str) -> str:
-        """Environment variable > helper command > literal config value."""
-        from_env = os.environ.get(env_var)
-        if from_env:
-            return from_env
-        if command:
-            try:
-                proc = subprocess.run(
-                    shlex.split(command),
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                    check=False,
-                )
-                if proc.returncode == 0:
-                    return proc.stdout.strip()
-                log.warning("secret command %r failed with %s", command, proc.returncode)
-            except (OSError, subprocess.SubprocessError) as exc:
-                log.warning("secret command %r failed: %s", command, exc)
-        return value
+        return resolve_secret(value, command, env_var)
 
     def smtp_password(self) -> str:
         return self.resolve_secret(
@@ -340,6 +400,20 @@ class AppConfig:
             "DCS_PIXELDRAIN_API_KEY",
         )
 
+    def virustotal_api_key(self) -> str:
+        return self.resolve_secret(
+            self.scan.intel.virustotal_api_key,
+            self.scan.intel.virustotal_api_key_command,
+            "DCS_VIRUSTOTAL_API_KEY",
+        )
+
+    def metadefender_api_key(self) -> str:
+        return self.resolve_secret(
+            self.scan.intel.metadefender_api_key,
+            self.scan.intel.metadefender_api_key_command,
+            "DCS_METADEFENDER_API_KEY",
+        )
+
     # -- serialisation ----------------------------------------------------
     def to_dict(self, *, mask_secrets: bool = False) -> dict[str, Any]:
         data = asdict(self)
@@ -350,6 +424,9 @@ class AppConfig:
             data["upload"]["pixeldrain"]["api_key"] = (
                 "***" if data["upload"]["pixeldrain"]["api_key"] else ""
             )
+            intel = data["scan"]["intel"]
+            for key in ("virustotal_api_key", "metadefender_api_key"):
+                intel[key] = "***" if intel[key] else ""
         return data
 
     @classmethod
@@ -383,11 +460,30 @@ class AppConfig:
         if self.watch.interval_s < 0.5:
             problems.append(f"watch.interval_s must be at least 0.5, not {self.watch.interval_s!r}")
         if self.scan.engines:
-            unknown = [e for e in self.scan.engines if e not in ("clamav", "heuristic")]
+            unknown = [e for e in self.scan.engines if e not in ENGINE_IDS]
             if unknown:
                 problems.append(f"unknown scan engine(s): {', '.join(unknown)}")
         if not self.scan.engines:
-            problems.append("no scan engine enabled: enable 'clamav' and/or 'heuristic'")
+            problems.append(
+                "no scan engine enabled: enable 'clamav', 'heuristic', 'yara' and/or 'intel'"
+            )
+        if self.scan.yara.severity not in SEVERITY_NAMES:
+            problems.append(
+                f"scan.yara.severity must be one of {', '.join(SEVERITY_NAMES)}, "
+                f"not {self.scan.yara.severity!r}"
+            )
+        if self.scan.intel.lookup not in LOOKUP_MODES:
+            problems.append(
+                f"scan.intel.lookup must be one of {', '.join(LOOKUP_MODES)}, "
+                f"not {self.scan.intel.lookup!r}"
+            )
+        if self.scan.intel.upload_unknowns and self.scan.intel.lookup != "upload":
+            problems.append(
+                "scan.intel.upload_unknowns is on but scan.intel.lookup is "
+                f"{self.scan.intel.lookup!r}: set lookup = \"upload\" to send files"
+            )
+        if self.scan.intel.rate_per_minute < 1:
+            problems.append("scan.intel.rate_per_minute must be at least 1")
         if self.archive.format not in ("zip", "7z"):
             problems.append(f"archive.format must be zip or 7z, not {self.archive.format!r}")
         if self.archive.when not in ("clean", "always", "never"):
@@ -411,6 +507,28 @@ class AppConfig:
 # ---------------------------------------------------------------------------
 # dotted option names ("watch.mode"), used by 'dcs config set'
 # ---------------------------------------------------------------------------
+
+
+def resolve_secret(value: str, command: str, env_var: str) -> str:
+    """Environment variable > helper command > literal config value."""
+    from_env = os.environ.get(env_var)
+    if from_env:
+        return from_env
+    if command:
+        try:
+            proc = subprocess.run(
+                shlex.split(command),
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return proc.stdout.strip()
+            log.warning("secret command %r failed with %s", command, proc.returncode)
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("secret command %r failed: %s", command, exc)
+    return value
 
 
 def option_paths(config: AppConfig | None = None) -> list[str]:
@@ -583,6 +701,8 @@ def _overlay(target: Any, data: dict[str, Any]) -> None:
 _RESOLVE: dict[str, Any] = {
     "GeneralConfig": GeneralConfig,
     "ClamAVConfig": ClamAVConfig,
+    "YaraConfig": YaraConfig,
+    "IntelConfig": IntelConfig,
     "ScanConfig": ScanConfig,
     "ArchiveConfig": ArchiveConfig,
     "GofileConfig": GofileConfig,
@@ -713,6 +833,7 @@ def load_config(
         "DCS_SMTP_FROM": ("email", "from_addr"),
         "DCS_SMTP_TO": ("email", "to_addrs"),
         "DCS_ENGINES": ("scan", "engines"),
+        "DCS_LOOKUP": ("scan.intel", "lookup"),
         "DCS_ARCHIVE_DIR": ("general", "output_dir"),
         "DCS_REPORT_DIR": ("report", "directory"),
     }
@@ -720,7 +841,9 @@ def load_config(
         raw = os.environ.get(env_var)
         if not raw:
             continue
-        section_obj = getattr(config, section)
+        section_obj: Any = config
+        for part in section.split("."):
+            section_obj = getattr(section_obj, part)
         if key in ("to_addrs", "engines"):
             values = [part.strip() for part in raw.split(",") if part.strip()]
             setattr(section_obj, key, values)

@@ -790,7 +790,7 @@ def test_validation_problems_requires_at_least_one_engine() -> None:
     config.scan.engines = []
 
     assert config.validation_problems() == [
-        "no scan engine enabled: enable 'clamav' and/or 'heuristic'"
+        "no scan engine enabled: enable 'clamav', 'heuristic', 'yara' and/or 'intel'"
     ]
 
 

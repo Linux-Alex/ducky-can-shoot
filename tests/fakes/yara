@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""A stand-in for the yara binary used by the DCS test suite.
+
+It implements the surface dcs.core.scanner.yara uses: --version, --recursive,
+--no-warnings, --print-namespace, --print-tags, --threads=N, then the rule
+files, then the target.  Results are derived from the file names so a test can
+ask for any outcome:
+
+    *ducky*       -> Duckyscript_Payload [malware,hid]
+    *suspicious*  -> Suspicious_PowerShell [suspicious]
+    *info*        -> Is_PE_File [info]
+    *badrule*     -> a "rule syntax error" line and exit code 1
+    anything else -> no match
+
+DCS_FAKE_YARA_SLEEP=<seconds> makes the pass slow, so a test can cancel it.
+"""
+
+import os
+import sys
+import time
+
+VERSION = "4.5.1-fake"
+
+
+def files_under(target: str):
+    if os.path.isdir(target):
+        for root_dir, _dirs, names in os.walk(target):
+            for name in names:
+                yield os.path.join(root_dir, name)
+    elif os.path.exists(target):
+        yield target
+
+
+def main(argv: list[str]) -> int:
+    if "--version" in argv or "-V" in argv:
+        print(VERSION)
+        return 0
+
+    namespace = "--print-namespace" in argv or "-e" in argv
+    print_tags = "--print-tags" in argv or "-g" in argv
+    sleep = 0.0
+    if os.environ.get("DCS_FAKE_YARA_SLEEP"):
+        sleep = float(os.environ["DCS_FAKE_YARA_SLEEP"])
+
+    positional = [arg for arg in argv[1:] if not arg.startswith("-")]
+    if len(positional) < 2:
+        print("error: no rules and no target")
+        return 2
+
+    target = positional[-1]
+    exit_code = 0
+    for path in files_under(target):
+        if sleep:
+            time.sleep(sleep)
+        name = os.path.basename(path).lower()
+        if "badrule" in name:
+            print("error: rule syntax error in the fake rule set")
+            exit_code = 1
+            continue
+        rule = tags = ""
+        if "ducky" in name:
+            rule, tags = "Duckyscript_Payload", "malware,hid"
+        elif "suspicious" in name:
+            rule, tags = "Suspicious_PowerShell", "suspicious"
+        elif "info" in name:
+            rule, tags = "Is_PE_File", "info"
+        elif "eicar" in name:
+            rule, tags = "EICAR_Test_String", "malware"
+        if not rule:
+            continue
+        label = f"dcs:{rule}" if namespace else rule
+        suffix = f" [{tags}]" if (print_tags and tags) else ""
+        print(f"{label}{suffix} {path}")
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

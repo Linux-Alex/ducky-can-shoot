@@ -8,6 +8,36 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
+### Added
+
+- **Two optional scan engines: YARA rules and hash intelligence.**
+  `scan.engines` now accepts `yara` and `intel` as well.
+
+  - **YARA** (`scan.yara`, off by default) runs a rule pack of your choice over
+    the whole medium. Rules cover what generic signatures miss on removable
+    media - Duckyscript payloads, autorun and shortcut tricks, download
+    cradles - and a free pack such as Neo23x0's signature-base is far more
+    useful than a second commodity AV. Rules come from `scan.yara.rules` (files
+    or directories) or `--yara-rules PATH`; each match becomes a finding naming
+    the rule, with its tags and namespace, and a rule's own `malware`/
+    `suspicious`/`info` tags decide the severity.
+  - **Hash intelligence** (`scan.intel`) reads extra `sha256 <name>` block
+    lists and, only when asked twice, asks VirusTotal and MetaDefender Cloud
+    about files it does not know. The default is `lookup = "off"`: nothing
+    leaves the machine. `lookup = "hash"` sends SHA-256 digests only;
+    `lookup = "upload"` together with `upload_unknowns = true` also sends
+    unknown files, and the report names every uploaded path. Answers are
+    cached for a week, lookups are rate limited and budgeted, and a provider
+    that refuses the key or runs out of quota is reported instead of silently
+    shrinking the scan.
+
+  Both engines run beside the batch engines, so a slow rule pack or a slow
+  provider does not stall the progress bar, and an engine that could not run
+  is a warning in the report rather than a clean verdict. New flags:
+  `--engines`, `--yara-rules`, `--lookup` and `--upload-unknowns` on `dcs scan`
+  and `dcs run`. Documented in `docs/CONFIGURATION.md` and
+  `docs/EXTENDING.md`, with 33 new tests.
+
 ### Fixed
 
 - **The version said three different things.** The README badge advertised

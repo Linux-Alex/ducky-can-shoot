@@ -62,7 +62,7 @@ when nothing overrides them.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `engines` | list of strings | `["clamav", "heuristic"]` | Engine ids to run, in order. Only `clamav` and `heuristic` are known; anything else is a configuration problem. An empty list is one too. `--engines` and `DCS_ENGINES` (comma separated) override it. |
+| `engines` | list of strings | `["clamav", "heuristic"]` | Engine ids to run, in order: `clamav`, `heuristic`, `yara`, `intel`. Anything else is a configuration problem, and so is an empty list. `--engines` and `DCS_ENGINES` (comma separated) override it. |
 | `max_file_size_mb` | int | `4096` | Files larger than this are not handed to the engines and are listed in the report under "coverage gaps". `0` means no limit. The heuristic engine also honours it. |
 | `max_findings` | int | `0` | Stop the scan after this many findings, recording a warning. `0` means keep going. Useful for a first look at a very dirty stick. |
 | `max_files` | int | `0` | Stop the walk after this many files. `0` means all of them. |
@@ -83,6 +83,54 @@ when nothing overrides them.
 | `extra_args` | list of strings | `[]` | Extra command line arguments appended to every ClamAV invocation, for example `["--max-filesize=100M"]`. |
 | `batch_size` | int | `400` | How many files go into one invocation (through a file list). The effective value is at least 32. Larger batches mean fewer database loads with `clamscan` and a coarser progress granularity. |
 | `max_database_age_days` | int | `7` | Warn in `dcs engines`, the GUI and the report when the newest signature file is older than this. DCS never runs `freshclam` for you. |
+
+### `[scan.yara]`
+
+YARA rules: the second signature engine, and the one whose rules you choose.
+It is **off by default** because an engine with no rules would report "clean"
+without having looked at a single pattern.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `false` | Run the `yara` engine when it is listed in `scan.engines`. |
+| `binary` | string | `"yara"` | The binary to run. YARA-X's `yr` is tried when `yara` is missing. |
+| `rules` | list of strings | `[]` | Rule files, or directories of `.yar`/`.yara` files, walked recursively. Empty means `$XDG_DATA_HOME/dcs/yara`, `/usr/share/yara`, `/usr/local/share/yara` and `/etc/yara`. |
+| `extra_args` | list of strings | `[]` | Extra arguments appended to the YARA invocation. |
+| `severity` | string | `"high"` | Severity of a match when the rule's tags say nothing. A rule tagged `malware`, `ransomware`, `suspicious`, `pua`, `info` and the like overrides it. |
+| `timeout_s` | int | `0` | Stop the pass after this many seconds. `0` means no limit; a rule pack with a pathological regex can otherwise run for a long time. |
+| `threads` | int | `0` | Workers YARA starts. `0` lets YARA decide from the CPU count. |
+
+A match becomes a finding that names the rule, with the tags and the
+namespace in its detail line, so the report says *why* a file matched.
+
+### `[scan.intel]`
+
+Known-hash lists, and optional reputation lookups. The shipped list in
+`dcs/data/hashes.txt` is used by the heuristic engine as well, so this engine
+adds your own lists on top and, when you opt in, asks a provider about the
+hashes it does not know.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Run the `intel` engine when it is listed in `scan.engines`. |
+| `hash_files` | list of strings | `[]` | Extra block lists, one `sha256 <name>` per line, `#` comments allowed. An exported MalwareBazaar dump or an internal list both fit. |
+| `lookup` | string | `"off"` | `off` keeps everything on the machine; `hash` sends the SHA-256 of unknown files to the providers; `upload` also allows sending the files themselves (see `upload_unknowns`). |
+| `virustotal_api_key` | string | `""` | VirusTotal API v3 key. Secret. |
+| `virustotal_api_key_command` | string | `""` | Command that prints the key, e.g. `pass show dcs/virustotal`. |
+| `metadefender_api_key` | string | `""` | MetaDefender Cloud key. Secret. |
+| `metadefender_api_key_command` | string | `""` | Command that prints the key. |
+| `max_hash_size_mb` | int | `256` | Files larger than this are not hashed for lookups. `0` means no limit. Hashing a 4 GiB image costs more than the lookup is worth. |
+| `max_lookups` | int | `200` | Stop asking after this many lookups in one run. `0` means no limit. Keeps a free-tier quota from being spent by one 20 000 file stick. |
+| `rate_per_minute` | int | `4` | Requests per minute against the providers. The free VirusTotal tier allows 4; a paid key can be raised a lot. |
+| `cache_ttl_hours` | int | `168` | How long an answer is reused. Answers live in `$XDG_CACHE_HOME/dcs/intel/answers.json`, so re-scanning the same stick costs nothing. |
+| `cache_dir` | string | `""` | Where the cache lives (empty = the XDG path above). |
+| `upload_unknowns` | bool | `false` | The second switch that upload mode needs: with `lookup = "upload"`, files the providers do not know are sent for analysis. Every uploaded path is named in the result warnings. |
+| `upload_max_size_mb` | int | `32` | Only files up to this size are uploaded (VirusTotal answers to 32 MiB directly). |
+| `timeout_s` | int | `60` | Seconds to wait for one provider answer. |
+
+A provider that refuses the key, runs out of quota or stops answering is
+reported as a warning and dropped for the rest of the run: a scan whose
+lookups failed is never presented as a clean opinion.
 
 ### `[archive]`
 
@@ -259,6 +307,32 @@ extra_args = []
 batch_size = 400
 max_database_age_days = 7
 
+[scan.yara]
+enabled = false
+binary = "yara"
+rules = []
+extra_args = []
+severity = "high"
+timeout_s = 0
+threads = 0
+
+[scan.intel]
+enabled = true
+hash_files = []
+lookup = "off"
+virustotal_api_key = ""
+virustotal_api_key_command = ""
+metadefender_api_key = ""
+metadefender_api_key_command = ""
+max_hash_size_mb = 256
+max_lookups = 200
+rate_per_minute = 4
+cache_ttl_hours = 168
+cache_dir = ""
+upload_unknowns = false
+upload_max_size_mb = 32
+timeout_s = 60
+
 [archive]
 enabled = true
 format = "zip"
@@ -386,6 +460,9 @@ split_size_mb = 1900                      # keep each volume under 2 GB
 | `DCS_SMTP_FROM` | `email.from_addr` | |
 | `DCS_SMTP_TO` | `email.to_addrs` | Comma separated; replaces the list. |
 | `DCS_ENGINES` | `scan.engines` | Comma separated; replaces the list. |
+| `DCS_LOOKUP` | `scan.intel.lookup` | `off`, `hash` or `upload`. |
+| `DCS_VIRUSTOTAL_API_KEY` | `scan.intel.virustotal_api_key` | Secret. Highest priority for the VirusTotal key. |
+| `DCS_METADEFENDER_API_KEY` | `scan.intel.metadefender_api_key` | Secret. Highest priority for the MetaDefender key. |
 | `DCS_ARCHIVE_DIR` | `general.output_dir` | Where archives are written. |
 | `DCS_REPORT_DIR` | `report.directory` | Where reports are written. |
 | `DCS_LOG_LEVEL` | logging | Default for `--log-level` and for the GUI. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
@@ -396,17 +473,20 @@ The environment is applied after the configuration files, so exporting
 
 ## Secret resolution order
 
-Three values are treated as secrets: the SMTP password, the gofile token and the
-pixeldrain API key. Each is resolved the same way, first hit wins:
+Five values are treated as secrets: the SMTP password, the gofile token, the
+pixeldrain API key and the VirusTotal and MetaDefender keys. Each is resolved the
+same way, first hit wins:
 
 1. **the environment variable** (`DCS_SMTP_PASSWORD`, `DCS_GOFILE_TOKEN`,
-   `DCS_PIXELDRAIN_API_KEY`);
+   `DCS_PIXELDRAIN_API_KEY`, `DCS_VIRUSTOTAL_API_KEY`, `DCS_METADEFENDER_API_KEY`);
 2. **the helper command** from the configuration (`email.password_command`,
-   `upload.gofile.token_command`, `upload.pixeldrain.api_key_command`), run with a
-   15 second timeout; the trimmed standard output is used, and a non-zero exit
-   code is logged and ignored;
+   `upload.gofile.token_command`, `upload.pixeldrain.api_key_command`,
+   `scan.intel.virustotal_api_key_command`, `scan.intel.metadefender_api_key_command`),
+   run with a 15 second timeout; the trimmed standard output is used, and a
+   non-zero exit code is logged and ignored;
 3. **the literal value in the file** (`email.password`, `upload.gofile.token`,
-   `upload.pixeldrain.api_key`).
+   `upload.pixeldrain.api_key`, `scan.intel.virustotal_api_key`,
+   `scan.intel.metadefender_api_key`).
 
 The SMTP user name is resolved separately: `DCS_SMTP_USERNAME` first, then
 `email.username`.
@@ -448,7 +528,12 @@ the user's own keyring) for the rest.
 DCS checks the configuration before it is used, both in `dcs doctor` and in the
 GUI:
 
-- `scan.engines` must contain only `clamav` and `heuristic`, and must not be empty.
+- `scan.engines` must contain only `clamav`, `heuristic`, `yara` and `intel`, and
+  must not be empty.
+- `scan.yara.severity` must be one of `info`, `low`, `medium`, `high`, `critical`.
+- `scan.intel.lookup` must be `off`, `hash` or `upload`;
+  `scan.intel.upload_unknowns` requires `lookup = "upload"`, and
+  `scan.intel.rate_per_minute` must be at least 1.
 - `archive.format` must be `zip` or `7z`.
 - `archive.when` must be `clean`, `always` or `never`.
 - `upload.upload_when` must be `clean`, `always` or `never`.

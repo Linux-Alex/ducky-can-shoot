@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-738%20passing-brightgreen" alt="738 tests passing">
+  <img src="https://img.shields.io/badge/tests-771%20passing-brightgreen" alt="771 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.2.1%20alpha-orange" alt="Status: 0.2.1 alpha">
@@ -40,7 +40,9 @@ DCS answers both in one run:
    misses on removable media: Duckyscript/BadUSB payload scripts, autorun.inf
    boot entries, PowerShell download cradles, double extensions, macro
    documents, PDF JavaScript, packed binaries with injection APIs, archive
-   bombs, encrypted archives and ransomware precursors.
+   bombs, encrypted archives and ransomware precursors. **YARA** rules and a
+   **known-hash intelligence** engine can be switched on as well, see
+   [Optional engines](#optional-engines).
 2. It compresses the medium into one zip (or 7z, optionally split into volumes).
 3. It uploads that image to a free host and emails the verdict, the numbers and
    the interesting findings to whoever should know (the HTML report and a CSV of
@@ -50,6 +52,29 @@ DCS answers both in one run:
    tool exists so that a suspicious stick cannot become a shared one by accident.
 
 Everything runs locally except the upload you asked for.
+
+## Optional engines
+
+Two more engines exist, both off until you configure them:
+
+- **YARA** (`scan.engines = ["clamav", "heuristic", "yara"]`) runs a rule pack of
+  your choice over the whole medium. Rules are the cheapest way to cover what
+  generic signatures miss on removable media - Duckyscript payloads, autorun
+  and shortcut tricks, download cradles - and a rule set such as Neo23x0's
+  [signature-base](https://github.com/Neo23x0/signature-base) is free. Point
+  `scan.yara.rules` at a directory, or try it once with
+  `dcs scan /media/stick --yara-rules ~/rules`.
+- **Hash intelligence** (`scan.engines = ["clamav", "heuristic", "intel"]`) reads
+  extra `sha256 <name>` block lists you keep, and - only if you ask for it
+  twice - asks VirusTotal or MetaDefender Cloud about files it does not know.
+  The default is `lookup = "off"`: nothing leaves the machine. `"hash"`
+  sends only SHA-256 digests; `"upload"` plus `upload_unknowns = true`
+  also sends unknown files, and the report names every file that was uploaded.
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the keys and
+[docs/EXTENDING.md](docs/EXTENDING.md) for the engine contract. Every engine
+that takes part is listed with its version in the result, and an engine that
+could not run is a warning in the report rather than a clean verdict.
 
 ## Screenshots
 
@@ -408,7 +433,7 @@ assistance.**
 - Large parts of the code, the tests, the documentation and the interface were
   written by AI agents (DeepSeek Harness sessions) under human direction and
   review, then verified before they were kept.
-- What "verified" means here: 738 automated tests, live upload round trips
+- What "verified" means here: 771 automated tests, live upload round trips
   against real hosts with checksum comparison, scans of a purpose-built sample
   medium with EICAR and synthetic malware shapes, and repeated runs of the
   interface in a real Plasma session. That last one is how several layout and
@@ -450,7 +475,7 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   installer.py         installing ClamAV through the system package manager
 src/dcs/gui/           PyQt6 facade, Qt models and the QML interface (Kirigami)
 src/dcs/cli.py         the dcs command
-tests/                 738 tests, hermetic: no network, no real device, fake ClamAV
+tests/                 771 tests, hermetic: no network, no real device, fake engines
 docs/                  architecture, configuration, CLI, troubleshooting, threat model, roadmap
 bin/dcs                run the checkout without installing
 scripts/               install.sh, uninstall.sh
@@ -458,7 +483,8 @@ packaging/             desktop entry and icon
 ```
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): module map, the event and sink design, threading, the stage flow
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): every key with its default
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): every key with its default,
+  including the optional YARA and hash-intelligence engines
 - [docs/CLI.md](docs/CLI.md): the command line reference
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): when something does not work
 - [docs/ROADMAP.md](docs/ROADMAP.md): what 0.2 should contain, and the plan to move the hot paths to Rust or C++

@@ -48,7 +48,7 @@ from dcs.core.installer import (
 from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import configure_logging, get_logger
 from dcs.core.pipeline import JobRequest, Pipeline
-from dcs.core.scanner import Scanner
+from dcs.core.scanner import ENGINE_LABELS, Scanner
 from dcs.core.upload import build_provider, provider_catalog
 from dcs.core.util import human_bytes, human_duration, human_rate
 from dcs.version import APP_HOMEPAGE, APP_LICENSE, APP_NAME, __version__
@@ -541,11 +541,33 @@ def cmd_devices(args: argparse.Namespace) -> int:
     return EXIT_CLEAN
 
 
+def apply_engine_flags(config: Any, args: argparse.Namespace) -> None:
+    """Apply --engines/--yara-rules/--lookup/--upload-unknowns to a config."""
+    if getattr(args, "engines", None):
+        config.scan.engines = parse_paths([args.engines])
+    if getattr(args, "yara_rules", None):
+        config.scan.yara.rules = list(args.yara_rules)
+        config.scan.yara.enabled = True
+        if "yara" not in config.scan.engines:
+            config.scan.engines.append("yara")
+    lookup = getattr(args, "lookup", None)
+    if lookup:
+        config.scan.intel.lookup = lookup
+    if getattr(args, "upload_unknowns", False):
+        # asking twice on purpose: the flag speaks for this run, and the engine
+        # still needs scan.intel.lookup = "upload" to consider uploading at all
+        config.scan.intel.lookup = "upload"
+        config.scan.intel.upload_unknowns = True
+        print(
+            colour("Note: unknown files will be sent to the provider for analysis.", "yellow"),
+            file=sys.stderr,
+        )
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    if args.engines:
-        config.scan.engines = parse_paths([args.engines])
-    if args.max_file_size_mb is not None:
+    apply_engine_flags(config, args)
+    if getattr(args, "max_file_size_mb", None) is not None:
         config.scan.max_file_size_mb = args.max_file_size_mb
 
     sink = CliSink(quiet=args.quiet)
@@ -571,6 +593,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    apply_engine_flags(config, args)
     if args.provider:
         config.upload.provider = args.provider
     if args.no_upload:
@@ -748,6 +771,22 @@ def cmd_config(args: argparse.Namespace) -> int:
 def cmd_engines(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     statuses = [status.to_dict() for status in Scanner(config.scan).statuses()]
+    # an engine that is installed but not switched on is the most common reason
+    # for "why did it not find anything", so it is listed here too
+    enabled = set(config.scan.engines)
+    for engine_id, label in ENGINE_LABELS.items():
+        if engine_id in enabled:
+            continue
+        statuses.append(
+            {
+                "id": engine_id,
+                "label": label,
+                "available": False,
+                "version": "",
+                "detail": f"not enabled: add {engine_id!r} to scan.engines",
+                "warnings": [],
+            }
+        )
     if args.json:
         print(json.dumps(statuses, indent=2))
         return EXIT_CLEAN
@@ -915,7 +954,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = subparsers.add_parser("scan", help="scan a path and report findings")
     scan.add_argument("path", help="mount point or directory to scan")
-    scan.add_argument("--engines", help="comma separated engine ids (clamav, heuristic)")
+    scan.add_argument(
+        "--engines",
+        help="comma separated engine ids (clamav, heuristic, yara, intel)",
+    )
+    scan.add_argument(
+        "--yara-rules",
+        action="append",
+        metavar="PATH",
+        help="YARA rule file or directory (repeatable); switches the yara engine on",
+    )
+    scan.add_argument(
+        "--lookup",
+        choices=("off", "hash", "upload"),
+        help="reputation lookups for unknown files (scan.intel.lookup)",
+    )
+    scan.add_argument(
+        "--upload-unknowns",
+        action="store_true",
+        help="send unknown files to the provider for analysis (needs an API key)",
+    )
     scan.add_argument("--max-file-size-mb", type=int, default=None)
     scan.add_argument("--json", action="store_true", help="print the full result as JSON")
     scan.add_argument("--quiet", action="store_true")
@@ -927,6 +985,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--label", help="name used in reports, archives and emails")
     run.add_argument("--to", action="append", help="recipient address (repeatable, comma separated)")
     run.add_argument("--provider", help="upload provider id (see 'dcs providers')")
+    run.add_argument(
+        "--engines",
+        help="comma separated engine ids (clamav, heuristic, yara, intel)",
+    )
+    run.add_argument(
+        "--yara-rules",
+        action="append",
+        metavar="PATH",
+        help="YARA rule file or directory (repeatable); switches the yara engine on",
+    )
+    run.add_argument(
+        "--lookup",
+        choices=("off", "hash", "upload"),
+        help="reputation lookups for unknown files (scan.intel.lookup)",
+    )
+    run.add_argument(
+        "--upload-unknowns",
+        action="store_true",
+        help="send unknown files to the provider for analysis (needs an API key)",
+    )
     run.add_argument("--output-dir", help="where the archive is written")
     run.add_argument("--no-archive", action="store_true", help="skip the archive stage")
     run.add_argument("--no-upload", action="store_true", help="never upload anything")

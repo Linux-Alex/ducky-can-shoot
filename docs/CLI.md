@@ -38,7 +38,7 @@ dcs devices --json | jq '.[] | select(.mounted == false)'
 
 Always exits 0, even when nothing is plugged in.
 
-### `dcs scan PATH [--engines IDS] [--max-file-size-mb N] [--json] [--quiet]`
+### `dcs scan PATH [--engines IDS] [--yara-rules PATH] [--lookup MODE] [--max-file-size-mb N] [--json] [--quiet]`
 
 Scans a directory and prints what it found. This is the scan stage on its own: no
 archive, no upload, no email and no report.
@@ -46,7 +46,10 @@ archive, no upload, no email and no report.
 | Option | Meaning |
 | --- | --- |
 | `PATH` | Mount point or directory to scan (required). |
-| `--engines IDS` | Comma separated engine ids: `clamav`, `heuristic`. |
+| `--engines IDS` | Comma separated engine ids: `clamav`, `heuristic`, `yara`, `intel`. |
+| `--yara-rules PATH` | YARA rule file or directory; repeatable, and it switches the `yara` engine on. |
+| `--lookup MODE` | Reputation lookups for unknown files: `off` (default), `hash` (SHA-256 only) or `upload`. |
+| `--upload-unknowns` | Also send unknown files to the provider. Prints a notice, because it publishes them to that service. |
 | `--max-file-size-mb N` | Skip files larger than N MiB (0 means no limit). |
 | `--json` | Print the complete `ScanResult` as JSON instead of the summary. |
 | `--quiet` | Suppress progress output. |
@@ -54,6 +57,8 @@ archive, no upload, no email and no report.
 ```bash
 dcs scan /media/$USER/USBSTICK
 dcs scan /media/$USER/USBSTICK --engines heuristic --max-file-size-mb 512
+dcs scan /media/$USER/USBSTICK --engines heuristic,yara --yara-rules ~/yara-rules
+dcs scan /media/$USER/USBSTICK --engines heuristic,intel --lookup hash
 dcs scan /media/$USER/USBSTICK --json > scan.json
 ```
 
@@ -70,6 +75,10 @@ Runs the complete job. Either `--device` or `--path` must be given.
 | `--label NAME` | device label, else directory name | Name used in reports, archive file names and the email. |
 | `--to ADDR` | `email.to_addrs` | Recipient; repeatable, and comma or semicolon separated inside one value. |
 | `--provider ID` | `upload.provider` | Upload provider id, see `dcs providers`. |
+| `--engines IDS` | `scan.engines` | Comma separated engine ids: `clamav`, `heuristic`, `yara`, `intel`. |
+| `--yara-rules PATH` | | YARA rule file or directory; repeatable, and it switches the `yara` engine on. |
+| `--lookup MODE` | `scan.intel.lookup` | `off`, `hash` or `upload` reputation lookups. |
+| `--upload-unknowns` | off | Send unknown files to the provider for analysis. |
 | `--output-dir DIR` | `general.output_dir` | Where the archive is written. |
 | `--no-archive` | off | Skip the archive stage. |
 | `--no-upload` | off | Never upload anything. |

@@ -86,3 +86,27 @@ class ScanEngine(Protocol):
 
     def scan_batch(self, entries: Sequence[FileEntry], ctx: ScanContext) -> Iterable[Finding]:
         """Scan a batch of files and yield findings."""
+
+
+@runtime_checkable
+class TreeScanEngine(Protocol):
+    """An engine that wants the whole root in one pass instead of batches.
+
+    YARA compiles its rules before it reads a single file, and the reputation
+    lookups keep one HTTP client and one answer cache per run: paying that cost
+    once per batch of 400 files would dominate the scan.  The scanner therefore
+    runs these engines in their own thread beside the batch engines.
+
+    Two rules come with the shape: never call ctx.tick_file (the batch engines
+    own the progress counters, and two engines counting the same file would
+    double the bar), and return as soon as ctx.cancelled is set.
+    """
+
+    engine_id: str
+    label: str
+
+    def status(self) -> EngineStatus:
+        """Report availability (binary present, rules/keys present, ...)."""
+
+    def scan_tree(self, root: str, ctx: ScanContext) -> Iterable[Finding]:
+        """Walk the root once, yielding findings as they are found."""

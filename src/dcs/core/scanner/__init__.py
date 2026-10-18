@@ -16,6 +16,7 @@ million small files.
 from __future__ import annotations
 
 import os
+import queue
 import threading
 import time
 from collections.abc import Iterator, Sequence
@@ -40,6 +41,8 @@ from dcs.core.log import get_logger
 from dcs.core.scanner.base import EngineStatus, ScanContext
 from dcs.core.scanner.clamav import ClamAVEngine
 from dcs.core.scanner.heuristic import HeuristicEngine, load_hash_db
+from dcs.core.scanner.intel import IntelEngine
+from dcs.core.scanner.yara import YaraEngine
 from dcs.core.util import FileEntry, human_bytes, iso_now, walk_files
 
 log = get_logger("scanner")
@@ -47,12 +50,28 @@ log = get_logger("scanner")
 #: an unbounded list would blow up the report on a drive with a million files
 FILE_LIST_LIMIT = 20000
 
+#: how long the scan waits for a tree engine (YARA, hash intelligence) before it
+#: gives up on it.  Bounded on purpose: a provider that stops answering must not
+#: hold a finished scan hostage.
+TREE_ENGINE_GRACE_S = 900
+
+#: display names for every engine id, including the ones a run does not use
+ENGINE_LABELS = {
+    "clamav": ClamAVEngine.label,
+    "heuristic": HeuristicEngine.label,
+    "yara": YaraEngine.label,
+    "intel": IntelEngine.label,
+}
+
 __all__ = [
+    "ENGINE_LABELS",
     "ClamAVEngine",
     "EngineStatus",
     "HeuristicEngine",
+    "IntelEngine",
     "ScanResult",
     "Scanner",
+    "YaraEngine",
     "compute_verdict",
 ]
 
@@ -87,9 +106,10 @@ class ScanResult:
 
     @property
     def limited_coverage(self) -> bool:
-        """True when no real antivirus engine took part in the scan."""
+        """True when no real signature engine took part in the scan."""
         return not any(
-            status.available and status.engine_id == "clamav" for status in self.engines
+            status.available and status.engine_id in ("clamav", "yara", "intel")
+            for status in self.engines
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -169,6 +189,24 @@ class Scanner:
                 engines.append(ClamAVEngine(self.config.clamav))
             elif engine_id == "heuristic":
                 engines.append(HeuristicEngine(self._hash_db))
+            elif engine_id == "yara":
+                if not self.config.yara.enabled:
+                    log.info("YARA is switched off in the configuration")
+                    continue
+                engines.append(YaraEngine(self.config.yara))
+            elif engine_id == "intel":
+                if not self.config.intel.enabled:
+                    log.info("hash intelligence is switched off in the configuration")
+                    continue
+                engines.append(
+                    IntelEngine(
+                        self.config.intel,
+                        follow_symlinks=self.config.follow_symlinks,
+                        include_hidden=self.config.include_hidden,
+                        exclude_globs=self.config.exclude_globs,
+                        max_file_size_mb=self.config.max_file_size_mb,
+                    )
+                )
             else:
                 log.warning("ignoring unknown scan engine %r", engine_id)
         return engines
@@ -197,6 +235,8 @@ class Scanner:
             for engine, status in zip(engines, result.engines, strict=True)
             if status.available
         ]
+        tree_engines = [engine for engine in usable if hasattr(engine, "scan_tree")]
+        batch_engines = [engine for engine in usable if not hasattr(engine, "scan_tree")]
         for status in result.engines:
             if not status.available:
                 result.warnings.append(f"{status.label} unavailable: {status.detail}")
@@ -298,33 +338,83 @@ class Scanner:
 
         ctx = ScanContext(root=root, config=self.config, cancel=cancel, sink=sink)
 
+        def record(finding: Finding) -> None:
+            """Admit one finding from any engine: de-duplicate, announce, count."""
+            key = (finding.path, finding.threat)
+            if key in seen:
+                return
+            seen.add(key)
+            self._finalise_finding(finding)
+            result.findings.append(finding)
+            sink.on_finding(finding)
+            sink.on_log(
+                "warning"
+                if severity_rank(finding.severity) >= severity_rank(Severity.MEDIUM)
+                else "info",
+                f"{finding.threat}: {finding.path}",
+            )
+            if self.config.max_findings and len(result.findings) >= self.config.max_findings:
+                result.warnings.append(
+                    f"stopped after {self.config.max_findings} findings (scan.max_findings)"
+                )
+                cancel.set()
+
+        # The tree engines (YARA, hash intelligence) scan the whole root in one
+        # pass and may talk to the network, so they run beside the batch engines
+        # instead of inside the batch loop.  They only hand findings over
+        # through a queue that this thread drains, which keeps the models and
+        # the counters on one thread.
+        arrivals: queue.Queue[tuple[str, Any, Any]] = queue.Queue()
+        workers: list[threading.Thread] = []
+
+        def run_tree_engine(engine: Any) -> None:
+            try:
+                for finding in engine.scan_tree(root, ctx):
+                    arrivals.put(("finding", engine, finding))
+                    if cancel.is_set():
+                        break
+            except Exception as exc:  # pragma: no cover - an engine crash must not lose the run
+                log.exception("%s failed", engine.label)
+                arrivals.put(("error", engine, exc))
+            finally:
+                arrivals.put(("done", engine, None))
+
+        for engine in tree_engines:
+            worker = threading.Thread(
+                target=run_tree_engine,
+                args=(engine,),
+                name=f"dcs-{engine.engine_id}",
+                daemon=True,
+            )
+            worker.start()
+            workers.append(worker)
+
+        def drain() -> None:
+            while True:
+                try:
+                    kind, engine, payload = arrivals.get_nowait()
+                except queue.Empty:
+                    return
+                if kind == "finding":
+                    record(payload)
+                elif kind == "error":
+                    message = f"{engine.label} failed: {payload}"
+                    result.warnings.append(message)
+                    sink.on_log("error", message)
+
+        drain()
+
         for batch, _batch_bytes in self._batches(root, batch_size, max_bytes, result):
             if cancel.is_set():
                 break
-            for index, engine in enumerate(usable):
+            for index, engine in enumerate(batch_engines):
                 # only the last engine reports fine grained progress, otherwise
                 # two engines would count the same file twice
-                ctx.tick = advance if index == len(usable) - 1 else None
+                ctx.tick = advance if index == len(batch_engines) - 1 else None
                 try:
                     for finding in engine.scan_batch(batch, ctx):
-                        key = (finding.path, finding.threat)
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        self._finalise_finding(finding)
-                        result.findings.append(finding)
-                        sink.on_finding(finding)
-                        sink.on_log(
-                            "warning"
-                            if severity_rank(finding.severity) >= severity_rank(Severity.MEDIUM)
-                            else "info",
-                            f"{finding.threat}: {finding.path}",
-                        )
-                        if self.config.max_findings and len(result.findings) >= self.config.max_findings:
-                            result.warnings.append(
-                                f"stopped after {self.config.max_findings} findings (scan.max_findings)"
-                            )
-                            cancel.set()
+                        record(finding)
+                        if cancel.is_set():
                             break
                 except Exception as exc:  # pragma: no cover - engine crash must not lose the run
                     message = f"{engine.label} failed on a batch: {exc}"
@@ -333,6 +423,7 @@ class Scanner:
                     sink.on_log("error", message)
                 if cancel.is_set():
                     break
+            drain()
             if cancel.is_set():
                 break
 
@@ -351,6 +442,19 @@ class Scanner:
             )
             if snapshot is not None:
                 sink.on_progress(snapshot)
+
+        # Wait for the tree engines, then take whatever they left in the queue.
+        for worker in workers:
+            worker.join(timeout=TREE_ENGINE_GRACE_S)
+            if worker.is_alive():  # pragma: no cover - a hung engine or provider
+                message = f"{worker.name} did not finish within {TREE_ENGINE_GRACE_S}s"
+                result.warnings.append(message)
+                sink.on_log("warning", message)
+                cancel.set()
+        drain()
+        for engine in tree_engines:
+            for note in getattr(engine, "notes", []) or []:
+                result.warnings.append(f"{engine.label}: {note}")
 
         # Engines do not always tick once per file (ClamAV reports per output
         # line, and a batch can fail), so a completed scan is reconciled against
