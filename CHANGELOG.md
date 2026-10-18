@@ -10,6 +10,14 @@ change between minor releases; each such change is listed below.
 
 ### Fixed
 
+- **The version said three different things.** The README badge advertised
+  `0.1.0 alpha`, the GitHub release said 0.2.1, and a launcher whose virtualenv
+  was installed a release earlier answered `0.2.0` on its About page. The badge,
+  the `.deb` name in the quick start and the sample transcript now carry the real
+  version, `scripts/bump-version.py` moves them together with `__version__`,
+  `scripts/make-screenshots.py` renders the identity the package actually has
+  instead of a hardcoded one, and `tests/test_version.py` fails as soon as a copy
+  drifts again.
 - **The "clean verdict" screenshot came from an infected run.** Every demo
   medium that `scripts/make-screenshots.py` built carried the samples - EICAR, a
   Duckyscript payload, an `autorun.inf`, a double extension, PowerShell and batch

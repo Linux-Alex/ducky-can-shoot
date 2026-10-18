@@ -12,7 +12,10 @@ What it changes, and why each one is needed:
   release from here, and a version that never moves looks abandoned;
 * `CHANGELOG.md` - the section for the tag is what the release workflow turns
   into the release notes, so "Unreleased" has to become "0.2.0 - 2026-10-15"
-  with a fresh empty "Unreleased" above it.
+  with a fresh empty "Unreleased" above it;
+* `README.md` - the status badge, the sample transcript and the `.deb` name in
+  the quick start all show the current version, and a README that advertises an
+  older one is the first thing a visitor reads wrong.
 
 The last commit before tagging is then a normal review step: run the tests, look
 at the diff, commit, and push the tag.
@@ -32,16 +35,18 @@ VERSION_FILE = REPO / "src" / "dcs" / "version.py"
 PYPROJECT = REPO / "pyproject.toml"
 METAINFO = REPO / "packaging" / "org.kde.dcs.metainfo.xml"
 CHANGELOG = REPO / "CHANGELOG.md"
+README = REPO / "README.md"
 
 
 def use_repo(path: Path) -> None:
     """Point every file at another checkout."""
-    global REPO, VERSION_FILE, PYPROJECT, METAINFO, CHANGELOG
+    global REPO, VERSION_FILE, PYPROJECT, METAINFO, CHANGELOG, README
     REPO = path.resolve()
     VERSION_FILE = REPO / "src" / "dcs" / "version.py"
     PYPROJECT = REPO / "pyproject.toml"
     METAINFO = REPO / "packaging" / "org.kde.dcs.metainfo.xml"
     CHANGELOG = REPO / "CHANGELOG.md"
+    README = REPO / "README.md"
 
 
 VERSION_RE = re.compile(r'^__version__ = "([^"]+)"$', re.M)
@@ -84,16 +89,26 @@ def main(argv: list[str]) -> int:
     match = VERSION_RE.search(text)
     if not match:
         fail(f"cannot find __version__ in {VERSION_FILE}")
-    print(f"  was {match.group(1)}")
+    previous = match.group(1)
+    print(f"  was {previous}")
     write(VERSION_FILE, VERSION_RE.sub(f'__version__ = "{version}"', text))
 
-    # 2. the packaging metadata
+    # 2. the README, wherever it names the version: the status badge, the sample
+    # transcript and the .deb in the quick start.  Every occurrence is the old
+    # version or nothing is, so a plain replacement cannot miss one silently.
+    text = README.read_text(encoding="utf-8")
+    if previous in text:
+        write(README, text.replace(previous, version))
+    else:
+        print(f"  {README.relative_to(REPO)} does not name the version")
+
+    # 3. the packaging metadata
     text = PYPROJECT.read_text(encoding="utf-8")
     if not PYPROJECT_RE.search(text):
         fail(f"cannot find version in {PYPROJECT}")
     write(PYPROJECT, PYPROJECT_RE.sub(f'version = "{version}"', text))
 
-    # 3. AppStream: a new <release> entry at the top of the list
+    # 4. AppStream: a new <release> entry at the top of the list
     text = METAINFO.read_text(encoding="utf-8")
     summary = re.search(
         r"## \[Unreleased\]\n(.*?)(?=\n## \[)", CHANGELOG.read_text(encoding="utf-8"), re.S
@@ -112,7 +127,7 @@ def main(argv: list[str]) -> int:
     if summary is None:  # pragma: no cover - the changelog always has the section
         fail("the changelog has no [Unreleased] section")
 
-    # 4. the changelog: name the section and open a fresh one
+    # 5. the changelog: name the section and open a fresh one
     text = CHANGELOG.read_text(encoding="utf-8")
     released = text.replace(
         "## [Unreleased]\n",

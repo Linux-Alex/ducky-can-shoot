@@ -43,6 +43,7 @@ import dcs.gui.backend as backend_module  # noqa: E402
 from dcs.core.config import load_config  # noqa: E402
 from dcs.core.device import BlockDevice  # noqa: E402
 from dcs.core.upload.base import UploadResult  # noqa: E402
+from dcs.version import APP_NAME, __version__  # noqa: E402
 from dcs.gui.app import find_qml_imports, qml_directory  # noqa: E402
 from dcs.gui.backend import Backend  # noqa: E402
 
@@ -249,8 +250,10 @@ class Shot:
             engine.addImportPath(path)
         engine.warnings.connect(lambda ws: self.warnings.extend(w.toString() for w in ws))
         engine.rootContext().setContextProperty("backend", backend)
-        engine.rootContext().setContextProperty("appVersion", "0.1.0")
-        engine.rootContext().setContextProperty("appName", "Ducky Can Shoot")
+        # the real strings the application itself puts there: a screenshot must
+        # not be able to advertise a version the package does not have
+        engine.rootContext().setContextProperty("appVersion", __version__)
+        engine.rootContext().setContextProperty("appName", APP_NAME)
         engine.load(QUrl.fromLocalFile(os.path.join(qml_directory(), "Main.qml")))
         window = engine.rootObjects()[0]
         window.show()

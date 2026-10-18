@@ -297,7 +297,7 @@ def test_the_notes_can_be_the_changelog_alone() -> None:
 
 def test_the_version_bump_moves_every_place_that_carries_a_version(tmp_path: Path) -> None:
     """One command has to do all four, or a release goes out half bumped."""
-    for name in ("pyproject.toml", "CHANGELOG.md"):
+    for name in ("pyproject.toml", "CHANGELOG.md", "README.md"):
         shutil.copy(REPO / name, tmp_path / name)
     (tmp_path / "src" / "dcs").mkdir(parents=True)
     shutil.copy(REPO / "src" / "dcs" / "version.py", tmp_path / "src" / "dcs" / "version.py")
@@ -317,6 +317,10 @@ def test_the_version_bump_moves_every_place_that_carries_a_version(tmp_path: Pat
 
     metainfo = ET.parse(tmp_path / "packaging" / METAINFO.name).getroot()
     assert metainfo.findall("releases/release")[0].get("version") == "9.9.9"
+
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "status-9.9.9%20alpha" in readme, "the README badge has to move with the version"
+    assert "ducky-can-shoot_9.9.9-1_all.deb" in readme
 
     changelog = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## [Unreleased]\n\nNothing yet.\n\n## [9.9.9] - " in changelog

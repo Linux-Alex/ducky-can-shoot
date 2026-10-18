@@ -53,7 +53,10 @@ That one command
 - adds a `<release version="0.2.0" date="...">` entry at the top of
   `packaging/org.kde.dcs.metainfo.xml`, which is what software centres show,
 - turns the changelog's `[Unreleased]` section into `## [0.2.0] - <date>`, opens
-  a fresh empty `[Unreleased]` above it and repoints the comparison links.
+  a fresh empty `[Unreleased]` above it and repoints the comparison links,
+- moves the version shown in `README.md`: the status badge, the `.deb` name in
+  the quick start and the sample transcript. A README that advertises the
+  previous release is the first thing a visitor reads wrong.
 
 Then:
 

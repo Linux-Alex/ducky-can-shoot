@@ -5,10 +5,10 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-732%20passing-brightgreen" alt="732 tests passing">
+  <img src="https://img.shields.io/badge/tests-738%20passing-brightgreen" alt="738 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
-  <img src="https://img.shields.io/badge/status-0.1.0%20alpha-orange" alt="Status: 0.1.0 alpha">
+  <img src="https://img.shields.io/badge/status-0.2.1%20alpha-orange" alt="Status: 0.2.1 alpha">
   <img src="https://img.shields.io/badge/AI--assisted-partially-8957e5" alt="Partially AI assisted">
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="Pull requests welcome"></a>
 </p>
@@ -112,7 +112,7 @@ Or, on Debian and Ubuntu, from the `.deb` of a release (see
 [the releases page](https://github.com/Linux-Alex/ducky-can-shoot/releases)):
 
 ```bash
-sudo apt install ./ducky-can-shoot_0.1.0-1_all.deb
+sudo apt install ./ducky-can-shoot_0.2.1-1_all.deb
 ```
 
 The script builds a virtual environment that can see the distribution packages,
@@ -189,7 +189,7 @@ $ dcs run --device /dev/sdb1 --to someone@example.org --yes
 ==> email: notifying someone@example.org
      email            ok                    00:01 - sent to someone@example.org
 
-VERDICT: INFECTED    Ducky Can Shoot 0.1.0
+VERDICT: INFECTED    Ducky Can Shoot 0.2.1
 ------------------------------------------------------------------------
   medium        : SANDISK16 (/run/media/aleks/SANDISK16)
   files scanned : 12,480 (3.4 GiB)
@@ -384,7 +384,7 @@ enabled:
 
 ```bash
 make deb
-sudo apt install ./dist/ducky-can-shoot_0.1.0-1_all.deb
+sudo apt install ./dist/ducky-can-shoot_0.2.1-1_all.deb
 man dcs
 ```
 
@@ -408,7 +408,7 @@ assistance.**
 - Large parts of the code, the tests, the documentation and the interface were
   written by AI agents (DeepSeek Harness sessions) under human direction and
   review, then verified before they were kept.
-- What "verified" means here: 732 automated tests, live upload round trips
+- What "verified" means here: 738 automated tests, live upload round trips
   against real hosts with checksum comparison, scans of a purpose-built sample
   medium with EICAR and synthetic malware shapes, and repeated runs of the
   interface in a real Plasma session. That last one is how several layout and
@@ -450,7 +450,7 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   installer.py         installing ClamAV through the system package manager
 src/dcs/gui/           PyQt6 facade, Qt models and the QML interface (Kirigami)
 src/dcs/cli.py         the dcs command
-tests/                 732 tests, hermetic: no network, no real device, fake ClamAV
+tests/                 738 tests, hermetic: no network, no real device, fake ClamAV
 docs/                  architecture, configuration, CLI, troubleshooting, threat model, roadmap
 bin/dcs                run the checkout without installing
 scripts/               install.sh, uninstall.sh
