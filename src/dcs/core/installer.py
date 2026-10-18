@@ -399,11 +399,17 @@ def build_steps(manager: PackageManager, *, want_daemon: bool = True) -> list[In
     return steps
 
 
-def render_script(steps: Sequence[InstallStep], *, distro: str = "", manager: str = "") -> str:
+def render_script(
+    steps: Sequence[InstallStep],
+    *,
+    distro: str = "",
+    manager: str = "",
+    title: str = "ClamAV installation plan",
+) -> str:
     """Render the plan as a small shell script the user can read and keep."""
     lines = [
         "#!/bin/bash",
-        "# Ducky Can Shoot - ClamAV installation plan",
+        f"# Ducky Can Shoot - {title}",
         f"# generated {iso_now()} for {distro or 'this machine'}"
         + (f" ({manager})" if manager else ""),
         "#",
@@ -441,6 +447,60 @@ def render_script(steps: Sequence[InstallStep], *, distro: str = "", manager: st
     return "\n".join(lines)
 
 
+def choose_method(plan: InstallPlan, prefer: str = "auto") -> None:
+    """Decide how to obtain root, and record it on the plan.
+
+    Shared by every plan DCS generates (the ClamAV installer and the updater),
+    because the rules are about the desktop, not about what is being installed.
+    """
+    if running_as_root():
+        plan.method, plan.method_label = "root", "running as root, no password needed"
+    elif prefer == "sudo" and shutil.which("sudo"):
+        # the CLI case: sudo asking inside this terminal is what a shell user
+        # expects, and it keeps the output in the same window
+        plan.method, plan.method_label = "sudo", "sudo will ask for your password here"
+        plan.runner = ["sudo"]
+    elif prefer == "terminal" or (prefer == "auto" and not polkit_agent_running()):
+        terminal, args = find_terminal()
+        if terminal:
+            plan.method = "terminal"
+            plan.method_label = (
+                "a terminal window will open and ask for your password "
+                f"({os.path.basename(terminal)})"
+            )
+            plan.terminal = terminal
+            plan.runner = [terminal, *args]
+        elif shutil.which("pkexec"):
+            plan.method, plan.method_label = "pkexec", "a system password dialog will appear"
+            plan.runner = ["pkexec"]
+        else:
+            plan.blocker = (
+                "no graphical password dialog and no terminal emulator were found; "
+                "copy the commands below and run them in a terminal yourself"
+            )
+            plan.method = "manual"
+    elif shutil.which("pkexec"):
+        plan.method, plan.method_label = "pkexec", "a system password dialog will appear"
+        plan.runner = ["pkexec"]
+    else:
+        terminal, args = find_terminal()
+        if terminal:
+            plan.method = "terminal"
+            plan.method_label = (
+                "a terminal window will open and ask for your password "
+                f"({os.path.basename(terminal)})"
+            )
+            plan.terminal = terminal
+            plan.runner = [terminal, *args]
+        elif shutil.which("sudo"):
+            plan.method = "sudo"
+            plan.method_label = "sudo will ask for your password on the terminal"
+            plan.runner = ["sudo"]
+        else:
+            plan.blocker = "neither pkexec nor sudo is available; run the commands below as root"
+            plan.method = "manual"
+
+
 def build_plan(
     *,
     config: Any = None,
@@ -467,47 +527,7 @@ def build_plan(
     plan.manager = manager
     plan.steps = build_steps(manager, want_daemon=want_daemon)
     plan.warnings.extend(manager.notes)
-
-    if running_as_root():
-        plan.method, plan.method_label = "root", "running as root, no password needed"
-    elif prefer == "sudo" and shutil.which("sudo"):
-        # the CLI case: sudo asking inside this terminal is what a shell user
-        # expects, and it keeps the output in the same window
-        plan.method, plan.method_label = "sudo", "sudo will ask for your password here"
-        plan.runner = ["sudo"]
-    elif prefer == "terminal" or (prefer == "auto" and not polkit_agent_running()):
-        terminal, args = find_terminal()
-        if terminal:
-            plan.method, plan.method_label = "terminal", f"a terminal window will open and ask for your password ({os.path.basename(terminal)})"
-            plan.terminal = terminal
-            plan.runner = [terminal, *args]
-        elif shutil.which("pkexec"):
-            plan.method, plan.method_label = "pkexec", "a system password dialog will appear"
-            plan.runner = ["pkexec"]
-        else:
-            plan.blocker = (
-                "no graphical password dialog and no terminal emulator were found; "
-                "copy the commands below and run them in a terminal yourself"
-            )
-            plan.method = "manual"
-    else:
-        if shutil.which("pkexec"):
-            plan.method, plan.method_label = "pkexec", "a system password dialog will appear"
-            plan.runner = ["pkexec"]
-        else:
-            terminal, args = find_terminal()
-            if terminal:
-                plan.method = "terminal", f"a terminal window will open and ask for your password ({os.path.basename(terminal)})"
-                plan.terminal = terminal
-                plan.runner = [terminal, *args]
-            elif shutil.which("sudo"):
-                plan.method, plan.method_label = "sudo", "sudo will ask for your password on the terminal"
-                plan.runner = ["sudo"]
-            else:
-                plan.blocker = (
-                    "neither pkexec nor sudo is available; run the commands below as root"
-                )
-                plan.method = "manual"
+    choose_method(plan, prefer)
 
     plan.script = render_script(plan.steps, distro=plan.distro, manager=manager.id)
     if write_script and plan.steps:

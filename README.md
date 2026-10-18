@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-773%20passing-brightgreen" alt="773 tests passing">
+  <img src="https://img.shields.io/badge/tests-825%20passing-brightgreen" alt="825 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.2.2%20alpha-orange" alt="Status: 0.2.2 alpha">
@@ -247,6 +247,7 @@ Exit codes make the result scriptable: **0** clean, **1** suspicious or infected
 | **Honest about coverage** | files skipped for size, unreadable paths, a missing ClamAV and a stale signature database are reported in the interface, the report and the email |
 | **USB detection** | Off by default. Turn it on and DCS can notify you when a stick is plugged in (with a button that opens it), open itself on the new medium, or run the whole job automatically - see [USB detection](#usb-detection-when-you-plug-something-in) |
 | **Nothing executable is run** | the medium is read, never written, and nothing found on it is ever executed |
+| **Updates** | Checks the GitHub release page when it starts (on by default, and from the settings page any time), then downloads, installs and restarts itself - including the background watcher - when you press the button. A git checkout is told to `git pull` instead of being touched |
 
 ## USB detection (when you plug something in)
 
@@ -433,7 +434,7 @@ assistance.**
 - Large parts of the code, the tests, the documentation and the interface were
   written by AI agents (DeepSeek Harness sessions) under human direction and
   review, then verified before they were kept.
-- What "verified" means here: 773 automated tests, live upload round trips
+- What "verified" means here: 825 automated tests, live upload round trips
   against real hosts with checksum comparison, scans of a purpose-built sample
   medium with EICAR and synthetic malware shapes, and repeated runs of the
   interface in a real Plasma session. That last one is how several layout and
@@ -475,7 +476,7 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   installer.py         installing ClamAV through the system package manager
 src/dcs/gui/           PyQt6 facade, Qt models and the QML interface (Kirigami)
 src/dcs/cli.py         the dcs command
-tests/                 773 tests, hermetic: no network, no real device, fake engines
+tests/                 825 tests, hermetic: no network, no real device, fake engines
 docs/                  architecture, configuration, CLI, troubleshooting, threat model, roadmap
 bin/dcs                run the checkout without installing
 scripts/               install.sh, uninstall.sh

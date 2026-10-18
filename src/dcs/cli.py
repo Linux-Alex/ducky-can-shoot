@@ -23,6 +23,7 @@ import threading
 import time
 from typing import Any
 
+from dcs.core import updates
 from dcs.core.config import (
     WATCH_MODES,
     default_config_path,
@@ -812,6 +813,52 @@ def cmd_providers(args: argparse.Namespace) -> int:
     return EXIT_CLEAN
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    """Check GitHub for a newer release; install it with --yes."""
+    config = load_config(args.config)
+    if not config.updates.enabled:
+        print("Update checks are switched off (updates.enabled = false).", file=sys.stderr)
+        return EXIT_CLEAN
+
+    check = updates.check_for_update()
+    if args.json and not (args.yes and check.can_install):
+        print(json.dumps(check.to_dict(), indent=2, ensure_ascii=False))
+        return EXIT_CLEAN if not check.newer else EXIT_THREAT
+
+    print(f"{APP_NAME} {check.current}")
+    print(f"  {check.message}")
+    if check.error:
+        return EXIT_ERROR
+    if not check.newer:
+        return EXIT_CLEAN
+    for other in check.other:
+        print(f"  note: also installed: {other}")
+    if not check.can_install or check.asset is None:
+        return EXIT_THREAT
+    print(f"  package: {check.asset.name} ({check.asset.to_dict()['sizeText']})")
+    if not args.yes:
+        print("  run 'dcs update --yes' to download and install it")
+        return EXIT_THREAT
+
+    try:
+        package = updates.download(check.asset, updates.download_dir())
+    except updates.UpdateError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"  downloaded {package} ({human_bytes(package.stat().st_size)})")
+    result = updates.install_release(
+        check, package, on_output=lambda line: print(f"  {line}"), prefer="sudo"
+    )
+    if not result.ok:
+        print(f"error: {result.message}", file=sys.stderr)
+        return EXIT_ERROR
+    if result.needs_restart:
+        message = updates.restart_watcher()
+        print(f"  installed. The background watcher: {message}")
+        print("  start the interface again to run the new version.")
+    return EXIT_CLEAN
+
+
 def cmd_install_clamav(args: argparse.Namespace) -> int:
     """Install the optional ClamAV engine through the system package manager.
 
@@ -1036,6 +1083,15 @@ def build_parser() -> argparse.ArgumentParser:
     providers = subparsers.add_parser("providers", help="list the available upload providers")
     providers.add_argument("--json", action="store_true")
     providers.set_defaults(func=cmd_providers)
+
+    update = subparsers.add_parser(
+        "update",
+        help="check GitHub for a newer release (and install it with --yes)",
+    )
+    update.add_argument("--check", action="store_true", help="only report; install nothing")
+    update.add_argument("--yes", action="store_true", help="download and install the release")
+    update.add_argument("--json", action="store_true", help="print the check as JSON")
+    update.set_defaults(func=cmd_update)
 
     install = subparsers.add_parser(
         "install-clamav",

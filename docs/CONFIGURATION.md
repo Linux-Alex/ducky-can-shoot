@@ -134,6 +134,26 @@ A provider that refuses the key, runs out of quota or stops answering is
 reported as a warning and dropped for the rest of the run: a scan whose
 lookups failed is never presented as a clean opinion.
 
+### `[updates]`
+
+Whether DCS looks for a newer release on GitHub. The check is one read-only
+request to the release API: it downloads nothing and changes nothing until the
+user presses **Download and Install** in the settings page (or runs
+`dcs update --yes`).
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `check_on_start` | bool | `true` | Check once when the interface starts, and say so when a newer release exists. The result is a passive notification, never a modal dialog. |
+| `check_interval_hours` | int | `6` | Do not ask GitHub again within this many hours; `0` checks on every start. The last answer is kept in `$XDG_CACHE_HOME/dcs/update-check.json`. |
+| `enabled` | bool | `true` | `false` switches the whole feature off, which is what an air-gapped machine wants. `dcs update` then prints the reason and exits 0. |
+
+What installing means depends on how the running copy was installed: a
+distribution package updates through `apt` (the password is collected by
+pkexec or sudo, never by DCS), a launcher virtualenv updates with a wheel and
+needs no privileges, and a git checkout is not touched at all. After a
+successful install the interface restarts itself and stops the background
+watcher first, so the watcher is started again from the new code.
+
 ### `[archive]`
 
 | Key | Type | Default | Meaning |
@@ -421,6 +441,11 @@ interval_s = 3.0
 ignore_existing = true
 notify_timeout_ms = 20000
 autostart = false
+
+[updates]
+check_on_start = true
+check_interval_hours = 6
+enabled = true
 ```
 
 A practical starting point for a workstation that should upload the image and mail
@@ -533,6 +558,7 @@ GUI:
 - `scan.engines` must contain only `clamav`, `heuristic`, `yara` and `intel`, and
   must not be empty.
 - `scan.yara.severity` must be one of `info`, `low`, `medium`, `high`, `critical`.
+- `updates.check_interval_hours` must be 0 or more (0 = check on every start).
 - `scan.intel.lookup` must be `off`, `hash` or `upload`;
   `scan.intel.upload_unknowns` requires `lookup = "upload"`, and
   `scan.intel.rate_per_minute` must be at least 1.

@@ -8,7 +8,24 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Update checks, and installing the update from the settings page.** DCS asks
+  the GitHub release API for the newest published release when the interface
+  starts (on by default, `updates.check_on_start`), keeps the answer in a cache
+  so a restart within six hours does not ask again, and shows a passive
+  notification when there is something newer. The settings page grew an
+  **Updates** card with the preference, a **Check for Updates** button, the
+  current version and the kind of installation it found, and a **Download and
+  Install** button.
+
+  Installing knows what it is updating: a distribution package goes through
+  `apt` with the password collected by pkexec or sudo (DCS never sees it), a
+  launcher virtualenv gets a wheel with no privileges at all, and a git
+  checkout is left alone - the card says `git pull` instead. After a
+  successful install the interface stops the background watcher and starts
+  itself again, so the watcher comes back running the new code.
+  `dcs update [--check] [--yes] [--json]` does the same on the command line.
 
 ## [0.2.2] - 2026-10-18
 

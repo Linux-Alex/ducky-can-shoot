@@ -62,6 +62,7 @@ Item {
 
     property string watchMode: "off"
     property bool watchAutostart: false
+    property bool updateCheckOnStart: true
 
     //! true while "Test SMTP" is waiting for the server
     property bool smtpTesting: false
@@ -133,6 +134,7 @@ Item {
 
         watchMode = s.watch.mode;
         watchAutostart = s.watch.autostart;
+        updateCheckOnStart = s.updates.check_on_start;
 
         // what is on screen now is what the file says: nothing to save
         savedDraft = JSON.stringify(draftPayload());
@@ -194,6 +196,9 @@ Item {
         payload.watch = {
             "mode": watchMode,
             "autostart": watchAutostart
+        };
+        payload.updates = {
+            "check_on_start": updateCheckOnStart
         };
         if (smtpPassword !== "") {
             payload.email.password = smtpPassword;
@@ -825,6 +830,124 @@ Item {
                                   : "Without a recipient the automatic run stops after the report and "
                                     + "shows the link on the Result page. Add one above to have the "
                                     + "email sent too."
+                        }
+                    }
+                }
+
+                // ------------------------------------------------------------ updates
+                Kirigami.Card {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.gridUnit
+                    Layout.rightMargin: Kirigami.Units.gridUnit
+                    padding: Kirigami.Units.largeSpacing
+
+                    contentItem: ColumnLayout {
+                        spacing: Kirigami.Units.largeSpacing
+
+                        Kirigami.Heading {
+                            level: 3
+                            text: "Updates"
+                        }
+
+                        Controls.CheckBox {
+                            id: updateCheckOnStartCheck
+                            objectName: "updateCheckOnStartCheck"
+                            Layout.fillWidth: true
+                            text: "Check for updates when Ducky Can Shoot starts"
+                            checked: view.updateCheckOnStart
+                            onToggled: view.updateCheckOnStart = checked
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            opacity: 0.8
+                            text: {
+                                const info = backend.updateInfo;
+                                const kind = info.install && info.install.detail
+                                    ? info.install.detail : "";
+                                return "Version " + backend.appVersion + (kind ? " · " + kind : "");
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Controls.Button {
+                                objectName: "checkForUpdatesButton"
+                                text: "Check for Updates"
+                                icon.name: "system-software-update"
+                                enabled: backend.updateState !== "checking"
+                                         && backend.updateState !== "installing"
+                                         && backend.updateState !== "restarting"
+                                onClicked: backend.checkForUpdates()
+                            }
+
+                            Controls.Button {
+                                objectName: "installUpdateButton"
+                                visible: backend.updateInfo.canInstall === true
+                                text: "Download and Install"
+                                icon.name: "download"
+                                enabled: backend.updateState === "available"
+                                onClicked: backend.installUpdate()
+                            }
+
+                            Controls.Button {
+                                objectName: "openReleaseButton"
+                                visible: backend.updateState === "available"
+                                text: "Release Notes"
+                                icon.name: "help-about"
+                                onClicked: backend.openReleasePage()
+                            }
+
+                            Controls.BusyIndicator {
+                                objectName: "updateBusy"
+                                running: backend.updateState === "checking"
+                                         || backend.updateState === "installing"
+                                         || backend.updateState === "restarting"
+                                visible: running
+                                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                                implicitHeight: Kirigami.Units.iconSizes.smallMedium
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Controls.Label {
+                            objectName: "updateMessage"
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            visible: text !== ""
+                            text: backend.updateInfo.message
+                            color: backend.updateState === "error"
+                                   ? Kirigami.Theme.negativeTextColor
+                                   : (backend.updateState === "available"
+                                      ? Kirigami.Theme.positiveTextColor
+                                      : Kirigami.Theme.textColor)
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            opacity: 0.7
+                            visible: backend.updateInfo.otherInstalls.length > 0
+                            text: "Also installed on this machine: "
+                                  + backend.updateInfo.otherInstalls.join("; ")
+                                  + ". DCS only updates the copy it is running from."
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            opacity: 0.7
+                            visible: backend.updateState === "available"
+                                  && backend.updateInfo.install.needsRoot === true
+                            text: "Installing the package asks for your system password; "
+                                  + "Ducky Can Shoot never sees it. The window restarts itself "
+                                  + "afterwards, and so does the background watcher."
                         }
                     }
                 }

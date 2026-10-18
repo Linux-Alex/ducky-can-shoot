@@ -100,12 +100,18 @@ def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
         "report",
         "gui",
         "watch",
+        "updates",
     }
     assert set(data["general"]) == {
         "confirm_before_upload",
         "keep_archive",
         "output_dir",
         "ui_refresh_ms",
+    }
+    assert set(data["updates"]) == {
+        "check_on_start",
+        "check_interval_hours",
+        "enabled",
     }
     assert set(data["gui"]) == {
         "auto_select_new_device",

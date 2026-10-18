@@ -11,7 +11,7 @@ from PyQt6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtQml import QQmlApplicationEngine, QQmlContext
 
-from dcs.core import autostart, service, session
+from dcs.core import autostart, service, session, updates
 from dcs.core.config import AppConfig, load_config
 from dcs.core.log import configure_logging, get_logger
 from dcs.gui.backend import Backend
@@ -207,6 +207,12 @@ def run_gui(
 
     if device:
         QTimer.singleShot(0, lambda: backend.openDevice(device, autorun=autorun))
+
+    # The update check is a read-only request to GitHub, made after the window is
+    # up so a slow network never delays the start.  It is skipped entirely when
+    # the configuration turns it off or the last check is still recent.
+    if updates.auto_check_due(backend.config.updates):
+        QTimer.singleShot(3000, backend.checkForUpdates)
 
     # push log records that happened before the UI existed
     ring = configure_logging(level=os.environ.get("DCS_LOG_LEVEL", "INFO"))

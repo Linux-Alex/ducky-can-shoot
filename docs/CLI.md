@@ -96,6 +96,27 @@ dcs run --path /mnt/stick --no-upload --no-email --json | jq .verdict
 
 Exit code: 0 clean, 1 suspicious or infected, 2 error or cancelled.
 
+### `dcs update [--check] [--yes] [--json]`
+
+Asks GitHub for the newest published release and compares it with the copy
+that is running. `--check` (or no flag) only reports; `--yes` downloads the
+package and installs it.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--check` | off | Report only. Exit code 1 means a newer release exists. |
+| `--yes` | off | Download the release package and install it. A `.deb` needs your password: sudo asks for it in this terminal. |
+| `--json` | off | Print the check as JSON instead of a sentence. |
+
+```bash
+dcs update --check                  # is there a newer release?
+dcs update --check --json | jq .   # the same question for a script
+dcs update --yes                    # download, install, restart the watcher
+```
+
+Exit codes: 0 up to date (or installed), 1 a newer release exists, 2 the check
+or the installation failed. The interface does the same thing from the
+settings page, where it can also restart itself afterwards.
 ### `dcs doctor [--json] [--offline] [--smtp]`
 
 Checks the Python version, the configuration for values that would break a run,

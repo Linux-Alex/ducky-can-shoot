@@ -351,6 +351,23 @@ class WatchConfig:
 
 
 @dataclass
+class UpdateConfig:
+    """Whether DCS looks for a newer release, and whether it may install one.
+
+    The check asks the GitHub release API for the newest published release and
+    compares it with the running version.  It is a read-only request: nothing
+    is downloaded and nothing changes until the user presses the button.
+    """
+
+    #: check when the interface starts
+    check_on_start: bool = True
+    #: hours between two automatic checks (0 = every start)
+    check_interval_hours: int = 6
+    #: the whole feature can be switched off, for air-gapped machines
+    enabled: bool = True
+
+
+@dataclass
 class AppConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     scan: ScanConfig = field(default_factory=ScanConfig)
@@ -360,6 +377,7 @@ class AppConfig:
     report: ReportConfig = field(default_factory=ReportConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
     watch: WatchConfig = field(default_factory=WatchConfig)
+    updates: UpdateConfig = field(default_factory=UpdateConfig)
     #: where this config was loaded from (informational)
     source_path: str = ""
 
@@ -484,6 +502,11 @@ class AppConfig:
             )
         if self.scan.intel.rate_per_minute < 1:
             problems.append("scan.intel.rate_per_minute must be at least 1")
+        if self.updates.check_interval_hours < 0:
+            problems.append(
+                f"updates.check_interval_hours must be 0 or more, "
+                f"not {self.updates.check_interval_hours!r}"
+            )
         if self.archive.format not in ("zip", "7z"):
             problems.append(f"archive.format must be zip or 7z, not {self.archive.format!r}")
         if self.archive.when not in ("clean", "always", "never"):
@@ -713,6 +736,7 @@ _RESOLVE: dict[str, Any] = {
     "ReportConfig": ReportConfig,
     "GuiConfig": GuiConfig,
     "WatchConfig": WatchConfig,
+    "UpdateConfig": UpdateConfig,
 }
 
 

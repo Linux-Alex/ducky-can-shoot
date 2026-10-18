@@ -11,11 +11,14 @@ from __future__ import annotations
 import contextlib
 import copy
 import os
+import shlex
+import subprocess
 import threading
 from dataclasses import fields, replace
 from typing import Any
 
 from PyQt6.QtCore import (
+    QCoreApplication,
     QObject,
     Qt,
     QThread,
@@ -27,7 +30,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QClipboard, QDesktopServices, QGuiApplication
 
-from dcs.core import autostart, service
+from dcs.core import autostart, service, updates
 from dcs.core.config import (
     WATCH_MODES,
     AppConfig,
@@ -50,6 +53,7 @@ from dcs.core.notify.desktop import ACTION_OPEN, build_notifier
 from dcs.core.pipeline import JobRequest
 from dcs.core.scanner import Scanner
 from dcs.core.upload import provider_catalog
+from dcs.core.util import human_bytes
 from dcs.core.watch import MODE_DESCRIPTIONS, MODE_LABELS
 from dcs.gui.models import (
     DevicesModel,
@@ -111,6 +115,10 @@ class Backend(QObject):
     watchStateChanged = pyqtSignal()
     installStateChanged = pyqtSignal()
     installFinished = pyqtSignal(object)
+    #: the update check or its installation changed state (see updateState)
+    updateStateChanged = pyqtSignal()
+    #: progress lines from the update thread; the message is updated on the GUI thread
+    updateLineReady = pyqtSignal(str)
     #: emitted from the installer thread; the model lives in the GUI thread, so
     #: Qt delivers these as queued calls and the model is only touched there
     installLineReady = pyqtSignal(str)
@@ -153,6 +161,12 @@ class Backend(QObject):
         self._install_thread: threading.Thread | None = None
         self._install_state = "idle"
         self._install_outcome: dict[str, Any] = {}
+        #: idle | checking | uptodate | available | installing | restarting | error
+        self._update_state = "idle"
+        self._update_check: updates.UpdateCheck | None = None
+        self._update_message = ""
+        self._restart_pending = False
+        self.updateLineReady.connect(self._on_update_line)
         #: the medium a notification or an automatic run is waiting for
         self._pending_device: dict[str, Any] = {}
         #: last save outcome, shown next to the save button instead of only in
@@ -925,6 +939,179 @@ class Backend(QObject):
     def openUrl(self, url: str) -> None:
         if url and not QDesktopServices.openUrl(QUrl(url)):
             self.toast.emit("error", f"Could not open {url}")
+
+    # ------------------------------------------------------------------
+    # updates
+    # ------------------------------------------------------------------
+    @pyqtProperty(str, notify=updateStateChanged)
+    def updateState(self) -> str:
+        """idle, checking, uptodate, available, installing, restarting or error."""
+        return self._update_state
+
+    @pyqtProperty("QVariantMap", notify=updateStateChanged)
+    def updateInfo(self) -> dict[str, Any]:
+        """Everything the settings card shows about the last check."""
+        info = self._update_check.to_dict() if self._update_check else {
+            "current": __version__,
+            "latest": "",
+            "newer": False,
+            "canInstall": False,
+            "asset": {},
+            "install": {},
+            "otherInstalls": [],
+            "message": "",
+            "releaseUrl": "",
+        }
+        info["state"] = self._update_state
+        if self._update_message:
+            info["message"] = self._update_message
+        return info
+
+    def _set_update_state(self, state: str, message: str = "") -> None:
+        self._update_state = state
+        if message:
+            self._update_message = message
+        self.updateStateChanged.emit()
+
+    @pyqtSlot()
+    def checkForUpdates(self) -> None:
+        """Ask GitHub for the newest release (threaded; never blocks the window)."""
+        if self._update_state in ("checking", "installing", "restarting"):
+            return
+        self._set_update_state("checking", "Checking GitHub for a newer release…")
+        self._run_async(
+            lambda: updates.check_for_update(),
+            self._on_update_checked,
+            self._on_update_failed,
+        )
+
+    def _on_update_checked(self, check: updates.UpdateCheck) -> None:
+        self._update_check = check
+        updates.write_state(check)
+        if check.error:
+            self._set_update_state("error", check.error)
+            return
+        if check.newer:
+            self._set_update_state("available", check.message)
+            # visible outside the settings page, which is where the update lives
+            self.toast.emit("info", check.message)
+            return
+        self._set_update_state("uptodate", check.message)
+
+    def _on_update_failed(self, message: str) -> None:
+        self._set_update_state("error", message or "The update check failed.")
+
+    @pyqtSlot(float, float)
+    def _on_download_progress(self, received: float, total: float) -> None:
+        if total:
+            self._set_update_state(
+                "installing",
+                f"Downloading: {human_bytes(received)} of {human_bytes(total)}",
+            )
+
+    @pyqtSlot(str)
+    def _on_update_line(self, line: str) -> None:
+        if line.strip():
+            self._update_message = line.strip()
+            self.updateStateChanged.emit()
+
+    @pyqtSlot()
+    def installUpdate(self) -> None:
+        """Download the release package, install it and restart the interface."""
+        check = self._update_check
+        if check is None or not check.can_install or check.asset is None:
+            self.toast.emit("warning", "There is nothing to install right now.")
+            return
+        if self._update_state in ("installing", "restarting"):
+            return
+        self._set_update_state("installing", f"Downloading {check.asset.name}…")
+
+        def work() -> updates.InstallResult:
+            assert check.asset is not None
+            package = updates.download(
+                check.asset,
+                updates.download_dir(),
+                on_progress=lambda received, total: self._on_download_progress(
+                    float(received), float(total)
+                ),
+            )
+            self.updateLineReady.emit("Installing the package…")
+            return updates.install_release(
+                check, package, on_output=self.updateLineReady.emit
+            )
+
+        self._run_async(work, self._on_update_installed, self._on_update_failed)
+
+    def _on_update_installed(self, result: updates.InstallResult) -> None:
+        if not result.ok:
+            self._set_update_state("error", result.message or "The installation failed.")
+            self.toast.emit("error", f"Update failed: {result.message}")
+            return
+        if not result.needs_restart:
+            self._set_update_state("uptodate", result.message)
+            return
+        self._set_update_state("restarting", "Installed. Restarting Ducky Can Shoot…")
+        self.toast.emit("info", "Installed. Restarting Ducky Can Shoot…")
+        self._restart_after_update()
+
+    def _restart_after_update(self) -> None:
+        """Stop the old watcher, start a new instance, and quit this one.
+
+        The background watcher runs the code that was there when it started, so
+        it is stopped here; app.aboutToQuit starts a fresh one from the new
+        installation, which is what "restart with the watcher included" means.
+        """
+        if self._restart_pending:
+            return
+        self._restart_pending = True
+        try:
+            stopped, message = service.stop()
+            log.info("watcher for the restart: %s", message if stopped else "not running")
+        except Exception as exc:  # pragma: no cover - a watcher that will not stop
+            log.warning("cannot stop the watcher before the restart: %s", exc)
+        argv = updates.restart_argv()
+        log.info("restarting Ducky Can Shoot: %s", " ".join(argv))
+        # Two seconds of quiet: this process has to let go of the session marker
+        # before the new one claims it, or the watcher would think no window is
+        # open for a moment and could react to the same medium twice.
+        command = "sleep 2; exec " + shlex.join(argv)
+        try:
+            subprocess.Popen(
+                ["sh", "-c", command],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:  # pragma: no cover - nothing left to restart with
+            self._set_update_state("error", f"Installed, but the restart failed: {exc}")
+            self._restart_pending = False
+            return
+        QTimer.singleShot(300, self._quit_for_restart)
+
+    @staticmethod
+    def _quit_for_restart() -> None:
+        application = QCoreApplication.instance()
+        if application is not None:
+            application.quit()
+
+    @pyqtSlot()
+    def openReleasePage(self) -> None:
+        check = self._update_check
+        url = check.release.url if check and check.release else ""
+        if not url:
+            url = f"{APP_HOMEPAGE}/releases"
+        if not QDesktopServices.openUrl(QUrl(url)):
+            self.toast.emit("error", f"Could not open {url}")
+
+    @pyqtSlot()
+    def resetUpdateState(self) -> None:
+        """Back to idle, e.g. after the user dismissed the banner."""
+        if self._update_state in ("installing", "restarting"):
+            return
+        self._update_message = ""
+        self._update_state = "idle"
+        self.updateStateChanged.emit()
 
     # ------------------------------------------------------------------
     # asynchronous tests (settings page)

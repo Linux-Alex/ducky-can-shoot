@@ -28,7 +28,7 @@ _PLATFORM_PLUGINS = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
 if not list(_PLATFORM_PLUGINS.glob("*offscreen*")):
     pytest.skip("the offscreen Qt platform plugin is not installed", allow_module_level=True)
 
-from dcs.core.config import AppConfig  # noqa: E402
+from dcs.core.config import AppConfig, UpdateConfig  # noqa: E402
 from dcs.core.device import BlockDevice  # noqa: E402
 from dcs.core.events import (  # noqa: E402
     STAGE_ORDER,
@@ -1359,5 +1359,104 @@ def test_the_about_page_shows_the_shipped_icon(backend: Backend, qapp: Any, qt_m
     )
 
     gui_app.teardown_engine(engine)
+
+
+# ---------------------------------------------------------------------------
+# updates
+# ---------------------------------------------------------------------------
+
+
+def test_the_update_preference_is_saved_and_reloaded(backend: Backend, qapp: Any) -> None:
+    """The checkbox in the settings page is a normal setting, not a live toggle."""
+    from dcs.core.config import load_config
+
+    assert backend.config.updates.check_on_start is True
+
+    backend.saveSettings({"updates": {"check_on_start": False}})
+    for _ in range(5):
+        qapp.processEvents()
+
+    path = backend.config.source_path
+    assert "check_on_start = false" in Path(path).read_text(encoding="utf-8")
+    assert load_config(path).updates.check_on_start is False
+
+
+def test_the_update_preference_defaults_to_on(backend: Backend) -> None:
+    assert UpdateConfig().check_on_start is True
+    assert backend.config.updates.check_on_start is True
+
+
+def test_the_update_check_reports_what_it_found(
+    backend: Backend, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dcs.core import updates
+    from dcs.gui import backend as backend_module
+
+    release = updates.Release.from_payload(
+        {
+            "tag_name": "v0.2.3",
+            "name": "Ducky Can Shoot 0.2.3",
+            "html_url": "https://example.invalid/v0.2.3",
+            "assets": [
+                {
+                    "name": "ducky_can_shoot-0.2.3-py3-none-any.whl",
+                    "browser_download_url": "https://example.invalid/pkg.whl",
+                    "size": 581157,
+                }
+            ],
+        }
+    )
+    check = updates.UpdateCheck(
+        current=__version__,
+        release=release,
+        target=updates.InstallTarget("venv", "venv at /tmp/v"),
+    )
+    monkeypatch.setattr(backend_module.updates, "check_for_update", lambda **_: check)
+    monkeypatch.setattr(backend_module.updates, "write_state", lambda _check: None)
+
+    backend.checkForUpdates()
+    for _ in range(200):
+        qapp.processEvents()
+        if backend.updateState != "checking":
+            break
+        time.sleep(0.01)
+
+    assert backend.updateState == "available"
+    info = backend.updateInfo
+    assert info["latest"] == "0.2.3"
+    assert info["canInstall"] is True
+    assert info["state"] == "available"
+    assert "0.2.3 is available" in info["message"]
+
+
+def test_installing_without_a_check_does_nothing(backend: Backend, qapp: Any) -> None:
+    messages: list[tuple[str, str]] = []
+    backend.toast.connect(lambda level, message: messages.append((level, message)))
+
+    backend.installUpdate()
+    for _ in range(3):
+        qapp.processEvents()
+
+    assert backend.updateState == "idle"
+    assert messages and messages[-1][0] == "warning"
+
+
+def test_the_settings_page_offers_the_update_controls() -> None:
+    settings = (ROOT_QML / "views" / "SettingsView.qml").read_text(encoding="utf-8")
+
+    assert '"Check for Updates"' in settings
+    assert '"Download and Install"' in settings
+    assert '"Check for updates when Ducky Can Shoot starts"' in settings
+    # the checkbox has to travel in the draft, or Save would silently drop it
+    assert "check_on_start" in settings
+    assert "payload.updates" in settings
+
+
+def test_the_interface_checks_for_updates_when_it_starts() -> None:
+    source = Path(gui_app.__file__).read_text(encoding="utf-8")
+
+    assert "updates.auto_check_due(backend.config.updates)" in source
+    assert "backend.checkForUpdates" in source
+
 
 
