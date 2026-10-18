@@ -52,6 +52,10 @@ def png_header(path: Path) -> tuple[int, int, int, int]:
     return width, height, depth, colour_type
 
 
+#: the small rendering that reports and emails carry with them
+DOCUMENT_ICON = REPO / "src" / "dcs" / "data" / "icon.png"
+
+
 def icon_path(size: int) -> Path:
     return HICOLOR / (str(size) + "x" + str(size)) / "apps" / "org.kde.dcs.png"
 
@@ -125,6 +129,18 @@ def test_every_size_is_square_transparent_and_free_of_a_white_edge(size: int) ->
         assert alpha.getextrema()[0] == 0, "the background has to be transparent"
         for corner in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)):
             assert alpha.getpixel(corner) < 8, f"{path} is opaque in a corner"
+
+
+
+def test_the_document_icon_is_a_small_rendering_of_the_same_drawing() -> None:
+    """Reports and emails are read elsewhere, so they carry the artwork."""
+    assert DOCUMENT_ICON.is_file(), "make icons did not write src/dcs/data/icon.png"
+
+    width, height, _depth, colour_type = png_header(DOCUMENT_ICON)
+
+    assert (width, height) == (96, 96)
+    assert colour_type == 6, "the document icon has no alpha channel"
+    assert DOCUMENT_ICON.stat().st_size < 64 * 1024, "it is inlined into every report"
 
 
 def test_the_artwork_is_not_a_flat_placeholder_any_more() -> None:

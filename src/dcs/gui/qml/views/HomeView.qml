@@ -493,6 +493,13 @@ Controls.ScrollView {
         }
     }
 
+    //! true when this run really sends an email: the checkbox says so *and* a
+    //! recipient is on screen, which is what the confirmation dialog promises.
+    //! Declared after the two controls it reads, so its first evaluation cannot
+    //! see them as null.
+    readonly property bool willEmail: emailCheck.checked
+                                      && recipientsField.text.trim() !== ""
+
     function launch() {
         backend.startJob({
             "source": backend.sourcePath,
@@ -517,9 +524,18 @@ Controls.ScrollView {
     Kirigami.PromptDialog {
         id: confirmDialog
         title: "Upload the archive?"
-        subtitle: "The image of this medium will be uploaded to " +
-                  (backend.providers[providerBox.currentIndex] ? backend.providers[providerBox.currentIndex].label : "") +
-                  + " and the download link will be emailed. Anyone with the link can download it."
+        subtitle: {
+            // the sentence has to match the two checkboxes above: promising an
+            // email that will not be sent (and a button that says it will) is
+            // exactly the kind of detail a warning dialog must not get wrong
+            const provider = backend.providers[providerBox.currentIndex]
+                ? backend.providers[providerBox.currentIndex].label : "";
+            let text = "The image of this medium will be uploaded to " + provider + ". ";
+            text += view.willEmail
+                ? "The download link will be emailed. "
+                : "No email will be sent: the link stays in Ducky Can Shoot. ";
+            return text + "Anyone with the link can download it.";
+        }
         customFooterActions: [
             Kirigami.Action {
                 text: "Cancel"
@@ -527,7 +543,8 @@ Controls.ScrollView {
                 onTriggered: confirmDialog.close()
             },
             Kirigami.Action {
-                text: "Upload and Email"
+                objectName: "confirmUploadAction"
+                text: view.willEmail ? "Upload and Email" : "Upload"
                 icon.name: "cloud-upload"
                 onTriggered: {
                     confirmDialog.close();

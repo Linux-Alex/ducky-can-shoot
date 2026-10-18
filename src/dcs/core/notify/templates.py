@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
+from dcs.core import branding
 from dcs.core.config import EmailConfig
 from dcs.core.events import Severity, Verdict, severity_rank
 from dcs.core.result import JobResult
@@ -87,6 +88,21 @@ def _finding_rows(result: JobResult, limit: int = 25) -> str:
     return "".join(rows)
 
 
+def _brand_mark() -> str:
+    """The icon, inline, for the header of the message.
+
+    A mail client never loads a picture from our disk, so the image travels with
+    the message as a related part (see Notifier.build_message) and this tag
+    points at its Content-ID.  Without the icon the header simply has none.
+    """
+    if not branding.icon_png():
+        return ""
+    return (
+        f'<img src="cid:{branding.CONTENT_ID}" width="26" height="26" alt="" '
+        'style="vertical-align:-7px;margin-right:9px;border-radius:6px;">'
+    )
+
+
 def render_email_html(result: JobResult) -> str:
     text_colour, background, accent = COLORS.get(result.verdict, COLORS[Verdict.ERROR])
     head = SUBJECT_HEADS.get(result.verdict, "UNKNOWN")
@@ -150,7 +166,7 @@ def render_email_html(result: JobResult) -> str:
 <body style="margin:0;padding:24px;background:#eff0f1;font-family:'Noto Sans',Arial,sans-serif;color:#232629;">
 <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;">
   <tr><td style="background:{accent};padding:18px 24px;color:#ffffff;">
-    <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;">{_esc(APP_NAME)}</div>
+    <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;">{_brand_mark()}{_esc(APP_NAME)}</div>
     <div style="font-size:22px;font-weight:700;margin-top:4px;">{_esc(head)}</div>
     <div style="font-size:13px;opacity:.9;margin-top:2px;">{_esc(device)}</div>
   </td></tr>

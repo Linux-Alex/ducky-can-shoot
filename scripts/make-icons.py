@@ -48,6 +48,13 @@ HICOLOR = REPO / "packaging" / "icons" / "hicolor"
 #: the copy that travels inside the package (window icon, About page)
 IN_APP = REPO / "src" / "dcs" / "gui" / "qml" / "icons" / "dcs.png"
 
+#: the small copy the reports and the emails carry: they are read on machines
+#: that have no icon theme of ours, so the drawing has to travel with them
+DOCUMENT_ICON = REPO / "src" / "dcs" / "data" / "icon.png"
+
+#: a report header and an email header do not need more than this
+DOCUMENT_SIZE = 96
+
 #: the sizes a theme may ask for, and which illustration to use
 SIZES = (16, 22, 24, 32, 48, 64, 128, 256, 512)
 
@@ -157,6 +164,16 @@ def main() -> int:
     big = icon(detail_master, 512)
     big.save(IN_APP, "PNG", optimize=True)
     print(f"  {IN_APP.relative_to(REPO)} ({IN_APP.stat().st_size // 1024} KiB)")
+
+    print("writing the copy that travels with reports and emails")
+    DOCUMENT_ICON.parent.mkdir(parents=True, exist_ok=True)
+    document = icon(detail_master, DOCUMENT_SIZE)
+    document.save(DOCUMENT_ICON, "PNG", optimize=True)
+    assert document.getchannel("A").getextrema()[0] == 0, "the document icon has no transparency"
+    print(
+        f"  {DOCUMENT_ICON.relative_to(REPO)} "
+        f"({DOCUMENT_ICON.stat().st_size // 1024} KiB, {document.size[0]} px)"
+    )
 
     print("done: the icon set is the two illustrations, nothing else")
     return 0

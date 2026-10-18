@@ -1361,6 +1361,16 @@ def test_the_about_page_shows_the_shipped_icon(backend: Backend, qapp: Any, qt_m
     gui_app.teardown_engine(engine)
 
 
+
+def test_the_confirmation_dialog_matches_the_job_checkboxes() -> None:
+    """Unchecking the email must not leave a button promising one."""
+    home = (ROOT_QML / "views" / "HomeView.qml").read_text(encoding="utf-8")
+
+    assert 'view.willEmail ? "Upload and Email" : "Upload"' in home
+    assert "No email will be sent" in home
+    assert "readonly property bool willEmail" in home
+    # a stray unary plus once turned the whole sentence into "...NaN"
+    assert "+ +" not in home
 # ---------------------------------------------------------------------------
 # updates
 # ---------------------------------------------------------------------------

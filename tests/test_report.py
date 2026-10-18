@@ -559,6 +559,27 @@ def test_write_reports_without_json_writes_three_files(
     ]
 
 
+
+def test_the_report_carries_the_artwork(clean_result: JobResult) -> None:
+    """The picture travels inside the document, so a mailed report keeps it."""
+    html = render_html(clean_result)
+
+    assert 'class="logo logo-icon"' in html
+    assert "data:image/png;base64," in html
+    assert 'alt="Ducky Can Shoot"' in html
+
+
+def test_a_report_without_the_artwork_falls_back_to_the_text_logo(
+    monkeypatch: pytest.MonkeyPatch, clean_result: JobResult
+) -> None:
+    import dcs.core.report as report_module
+
+    monkeypatch.setattr(report_module.branding, "data_uri", lambda: "")
+
+    html = render_html(clean_result)
+
+    assert '<div class="logo">DCS</div>' in html
+    assert "data:image" not in html
 def test_write_reports_disabled_writes_nothing(tmp_path: Path, infected_result: JobResult) -> None:
     config = ReportConfig()
     config.enabled = False

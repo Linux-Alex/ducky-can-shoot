@@ -448,13 +448,56 @@ def test_build_message_headers_and_alternative_body(email_config: EmailConfig) -
     assert message["Message-ID"].endswith("@example.test>")
 
     assert message.get_content_type() == "multipart/alternative"
-    assert [part.get_content_type() for part in message.iter_parts()] == ["text/plain", "text/html"]
+    # the html alternative is wrapped in a related part, which is where the
+    # inline artwork lives
+    assert [part.get_content_type() for part in message.iter_parts()] == [
+        "text/plain",
+        "multipart/related",
+    ]
     assert message.get_body(preferencelist=("plain",)).get_content().startswith(
         f"{APP_NAME} - INFECTED"
     )
     assert "KINGSTON" in message.get_body(preferencelist=("html",)).get_content()
     assert not list(message.iter_attachments())
 
+
+
+def test_the_email_carries_the_artwork_inline(email_config: EmailConfig) -> None:
+    """A mail client never loads a file from our disk: the picture travels along."""
+    message = Notifier(email_config).build_message(make_job())
+
+    html = message.get_body(preferencelist=("html",)).get_content()
+    assert 'src="cid:dcs-icon"' in html
+
+    images = [part for part in message.walk() if part.get_content_type() == "image/png"]
+    assert images, "the inline image is missing"
+    assert images[0]["Content-ID"] == "<dcs-icon>"
+    assert images[0].get_content_maintype() == "image"
+
+
+def test_the_inline_artwork_survives_attachments(email_config: EmailConfig, tmp_path: Path) -> None:
+    attachment = tmp_path / "report.csv"
+    attachment.write_text("path,threat\n", encoding="utf-8")
+
+    message = Notifier(email_config).build_message(make_job(), attachments=[str(attachment)])
+
+    assert message.get_content_type() == "multipart/mixed"
+    images = [part for part in message.walk() if part.get_content_type() == "image/png"]
+    assert images, "the attachment changed the structure and dropped the image"
+    assert [part.get_filename() for part in message.iter_attachments()] == ["report.csv"]
+
+
+def test_a_message_without_artwork_has_no_image(monkeypatch: pytest.MonkeyPatch, email_config: EmailConfig) -> None:
+    import dcs.core.notify.smtp as smtp_module
+    import dcs.core.notify.templates as templates_module
+
+    monkeypatch.setattr(smtp_module.branding, "icon_png", lambda: b"")
+    monkeypatch.setattr(templates_module.branding, "icon_png", lambda: b"")
+
+    message = Notifier(email_config).build_message(make_job())
+
+    assert not [part for part in message.walk() if part.get_content_type() == "image/png"]
+    assert "cid:dcs-icon" not in message.get_body(preferencelist=("html",)).get_content()
 
 def test_build_message_omits_optional_headers(email_config: EmailConfig) -> None:
     """Cc and Reply-To only appear when they are configured."""

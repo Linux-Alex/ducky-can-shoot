@@ -14,6 +14,7 @@ import time
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
+from dcs.core import branding
 from dcs.core.config import EmailConfig
 from dcs.core.log import get_logger
 from dcs.core.notify.templates import build_subject, render_email_html, render_email_text
@@ -57,6 +58,21 @@ class Notifier:
 
         message.set_content(render_email_text(result))
         message.add_alternative(render_email_html(result), subtype="html")
+
+        # The header carries the artwork inline.  A related part keeps the image
+        # inside the message (no external URL to be blocked or loaded by a
+        # tracker) and mail clients show it from the Content-ID the HTML uses.
+        icon = branding.icon_png()
+        if icon:
+            parts = message.get_payload()
+            if isinstance(parts, list) and len(parts) > 1:
+                parts[1].add_related(
+                    icon,
+                    maintype="image",
+                    subtype="png",
+                    cid=branding.content_id(),
+                    filename="org.kde.dcs.png",
+                )
 
         for path in attachments or []:
             if not path or not os.path.isfile(path):

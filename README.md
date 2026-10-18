@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-830%20passing-brightgreen" alt="830 tests passing">
+  <img src="https://img.shields.io/badge/tests-837%20passing-brightgreen" alt="837 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.2.3%20alpha-orange" alt="Status: 0.2.3 alpha">
@@ -241,8 +241,8 @@ Exit codes make the result scriptable: **0** clean, **1** suspicious or infected
 | **Removable media handling** | lsblk for discovery, udisks2 for mounting without root, or triage any folder instead |
 | **Archiving** | zip or 7z, optional volume splitting, free space pre-check, a shared SHA-256 for the image, a Python fallback when the archivers are missing |
 | **Seven upload hosts** | gofile.io by default (free JSON API, no account), plus litterbox, temp.sh, x0.at, catbox, tmpfiles.org and pixeldrain, behind one adapter interface with streaming uploads, retries and host checksum verification |
-| **Reports** | self contained HTML, plain text, findings CSV and machine readable JSON, written atomically |
-| **Email** | HTML and text body, verdict, numbers, findings, the link when safe, report attached, Bcc supported, and a dry run that writes the message to disk instead of sending it |
+| **Reports** | self contained HTML (with the artwork embedded, so a mailed report keeps it), plain text, findings CSV and machine readable JSON, written atomically |
+| **Email** | HTML and text body with the artwork inline, verdict, numbers, findings, the link when safe, report attached, Bcc supported, and a dry run that writes the message to disk instead of sending it |
 | **Live interface** | seven stages with their own progress, files/bytes counters, throughput chart, current file, findings as they appear, log pane |
 | **Honest about coverage** | files skipped for size, unreadable paths, a missing ClamAV and a stale signature database are reported in the interface, the report and the email |
 | **USB detection** | Off by default. Turn it on and DCS can notify you when a stick is plugged in (with a button that opens it), open itself on the new medium, or run the whole job automatically - see [USB detection](#usb-detection-when-you-plug-something-in) |
@@ -434,7 +434,7 @@ assistance.**
 - Large parts of the code, the tests, the documentation and the interface were
   written by AI agents (DeepSeek Harness sessions) under human direction and
   review, then verified before they were kept.
-- What "verified" means here: 830 automated tests, live upload round trips
+- What "verified" means here: 837 automated tests, live upload round trips
   against real hosts with checksum comparison, scans of a purpose-built sample
   medium with EICAR and synthetic malware shapes, and repeated runs of the
   interface in a real Plasma session. That last one is how several layout and
@@ -476,7 +476,7 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   installer.py         installing ClamAV through the system package manager
 src/dcs/gui/           PyQt6 facade, Qt models and the QML interface (Kirigami)
 src/dcs/cli.py         the dcs command
-tests/                 830 tests, hermetic: no network, no real device, fake engines
+tests/                 837 tests, hermetic: no network, no real device, fake engines
 docs/                  architecture, configuration, CLI, troubleshooting, threat model, roadmap
 bin/dcs                run the checkout without installing
 scripts/               install.sh, uninstall.sh

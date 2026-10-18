@@ -15,6 +15,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from dcs.core import branding
 from dcs.core.config import ReportConfig
 from dcs.core.events import Severity, Verdict, severity_rank
 from dcs.core.log import get_logger
@@ -71,6 +72,9 @@ header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
   color: #fff; font-size: 26px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
 }
+/* the artwork, embedded as a data URI so the file stays self contained */
+.logo-icon { background: transparent; border-radius: 0; }
+.logo img { width: 56px; height: 56px; display: block; }
 h1 { font-size: 22px; margin: 0; }
 h2 { font-size: 16px; margin: 32px 0 12px; color: #4d4d4d; text-transform: uppercase; letter-spacing: .06em; }
 .sub { color: #7a7d80; font-size: 13px; }
@@ -167,8 +171,17 @@ def render_html(result: JobResult, config: ReportConfig | None = None) -> str:
     add(f"<title>{_esc(APP_SHORT)} report - {_esc(result.source_label or result.source_path)}</title>")
     add(f"<style>{STYLE}</style></head><body><div class=\"wrap\">")
 
-    # header
-    add('<header><div class="logo">DCS</div><div>')
+    # header: the artwork travels inside the document, so a report that is
+    # mailed to somebody else still shows whose tool produced it
+    uri = branding.data_uri()
+    if uri:
+        logo = (
+            f'<div class="logo logo-icon"><img src="{uri}" width="56" height="56" '
+            f'alt="{_esc(APP_NAME)}"></div>'
+        )
+    else:
+        logo = '<div class="logo">DCS</div>'
+    add(f"<header>{logo}<div>")
     add(f"<h1>{_esc(APP_NAME)} - USB triage report</h1>")
     add(
         f'<div class="sub">Job {_esc(result.job_id)} · {_esc(result.started_at)} · '

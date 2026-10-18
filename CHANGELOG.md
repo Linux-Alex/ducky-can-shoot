@@ -28,6 +28,22 @@ Nothing yet.
 
 ### Added
 
+- **The duck travels with the report and the email.** The HTML report had a
+  box with the letters "DCS" where the artwork should be, and the email header
+  had only text. Both now carry the icon: the report embeds a 96 px rendering
+  as a data URI, so the file stays self contained (it is opened on machines
+  that never saw this project), and the email carries it as a related part with
+  a `Content-ID`, which is how mail clients show an inline image without
+  loading anything from the internet. The PNG is written by `make icons` from
+  the same illustrations as the theme icons, and both documents fall back to a
+  plain wordmark when it is missing.
+
+- **The upload confirmation now matches the job options.** With the email
+  checkbox off, the dialog promised an email that would not be sent and the
+  button still said **Upload and Email**; it now says **Upload** and explains
+  that the link stays in the interface. (The old sentence also ended in
+  "NaN": a stray `+` turned the string concatenation into arithmetic.)
+
 - **Update checks, and installing the update from the settings page.** DCS asks
   the GitHub release API for the newest published release when the interface
   starts (on by default, `updates.check_on_start`), keeps the answer in a cache
