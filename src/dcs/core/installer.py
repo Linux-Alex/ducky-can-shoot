@@ -596,7 +596,14 @@ def build_freshclam_plan(
         plan.steps = [
             InstallStep(
                 title=f"refresh the signatures in {datadir}",
-                argv=("freshclam", f"--datadir={datadir}", "--stdout"),
+                # the log belongs next to the database, or freshclam tries to
+                # write /var/log/clamav and refuses to start as a normal user
+                argv=(
+                    "freshclam",
+                    f"--datadir={datadir}",
+                    f"--log={datadir}/freshclam.log",
+                    "--stdout",
+                ),
             )
         ]
         plan.method = "direct"

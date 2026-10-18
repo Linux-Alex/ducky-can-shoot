@@ -121,7 +121,7 @@ jobs:
             mkdir -p /tmp/stick
             printf "X5O!P%%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*" > /tmp/stick/eicar.com
             /dist/DuckyCanShoot-*.AppImage --appimage-extract-and-run scan /tmp/stick
-          ' | tee appimage-smoke.txt
+          ' 2>&1 | tee appimage-smoke.txt
           grep -q "EICAR" appimage-smoke.txt || { echo "the bundled database did not detect EICAR"; exit 1; }
 
       - name: Store the AppImage

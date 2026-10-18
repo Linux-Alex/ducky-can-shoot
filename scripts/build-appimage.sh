@@ -27,6 +27,12 @@ LIBDIR="${LIBDIR:-/usr/lib/${ARCH}-linux-gnu}"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
+# appimagetool extracts itself into TMPDIR; a fresh one keeps the build from
+# tripping over leftovers of an earlier run by another user.
+TMPDIR="$(mktemp -d)"
+export TMPDIR
+trap 'rm -rf "$TMPDIR"' EXIT
+
 say "checking the build packages"
 missing=""
 for module in PyQt6.QtQml PyQt6.QtQuick requests; do
@@ -106,8 +112,22 @@ cp -a "$LIBDIR"/libclamav*.so* "$LIBDIR"/libfreshclam*.so* "$LIBDIR"/libclammspa
 cp -a /etc/clamav "$APPDIR/usr/etc" 2>/dev/null || { mkdir -p "$APPDIR/usr/etc"; cp -a /etc/clamav "$APPDIR/usr/etc/"; }
 # freshclam drops to the "clamav" user when run as root, which cannot write into
 # the build tree; --user=root keeps the database where the image will find it.
-if ! "$APPDIR/usr/bin/freshclam" --user=root --datadir="$APPDIR/usr/share/dcs/clamav" --stdout 2>&1 | tail -3; then
-    say "warning: freshclam could not fetch a database; the image ships without signatures"
+# As a normal user there is no privilege drop, and --user must not be passed.
+FRESHCLAM_USER=""
+if [ "$(id -u)" = "0" ]; then FRESHCLAM_USER="--user=root"; fi
+if ! "$APPDIR/usr/bin/freshclam" $FRESHCLAM_USER \
+        --datadir="$APPDIR/usr/share/dcs/clamav" \
+        --log="$APPDIR/usr/share/dcs/clamav/freshclam.log" --stdout 2>&1 | tail -5; then
+    say "warning: freshclam reported a problem while fetching the database"
+fi
+if ! ls "$APPDIR/usr/share/dcs/clamav"/*.cvd >/dev/null 2>&1; then
+    say "error: no signature database was fetched; a bundled ClamAV would find nothing"
+    exit 1
+fi
+
+if [ "${SKIP_PACKAGE:-0}" != "0" ]; then
+    say "SKIP_PACKAGE is set: the AppDir is ready at ${APPDIR#$REPO/}, no image was written"
+    exit 0
 fi
 
 say "writing the SquashFS image"
