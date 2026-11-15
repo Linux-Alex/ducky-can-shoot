@@ -104,6 +104,22 @@ wheel, the sdist, the `.deb`, the AppImage and `SHA256SUMS`. `-NoWatch` only
 pushes the tag. It needs Git for Windows and the GitHub CLI, logged in
 (`gh auth login`).
 
+If the tag is already on `origin` but no release was published for it - the
+usual reason being a workflow that never started, for example because GitHub
+says the account is locked for billing - the script refuses to guess and asks
+for `-Retrigger`:
+
+```powershell
+pwsh -File scripts/release-windows.ps1 -Retrigger
+```
+
+That deletes the remote tag and pushes it again, which is what starts the
+release workflow a second time; it refuses when a release already exists. Fix
+the billing problem first (GitHub: Settings, Billing and plans): no workflow can
+run while the account is locked, and every job fails in the first second with
+"The job was not started because your account is locked due to a billing
+issue."
+
 Both scripts are thin wrappers around the same three commands; neither invents
 a version or edits the changelog, so a release always starts with
 `scripts/bump-version.py` on a checkout.

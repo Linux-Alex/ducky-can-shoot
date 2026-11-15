@@ -28,6 +28,13 @@
     Move an existing tag.  Dangerous: a published tag and its release already
     point somewhere, and moving it confuses everybody who downloaded it.
 
+.PARAMETER Retrigger
+    The tag is already on origin but no release was published for it (the
+    common case being a workflow that never started, for example because
+    GitHub reported "your account is locked due to a billing issue").  Delete
+    the remote tag and push it again, which is what starts the release
+    workflow a second time.  Refused when a release already exists.
+
 .EXAMPLE
     pwsh -File scripts/release-windows.ps1
 
@@ -39,7 +46,8 @@ param(
     [string]$Version = "",
     [switch]$DryRun,
     [switch]$NoWatch,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Retrigger
 )
 
 $ErrorActionPreference = 'Stop'
@@ -112,8 +120,25 @@ if ($LASTEXITCODE -eq 0 -and $remoteHead -and $localHead -ne $remoteHead) {
     Fail "HEAD is not what origin/$branch points at; pull or push first (git status)"
 }
 
-$existing = (& git ls-remote --tags origin $tag)
-if ($existing -and -not $Force) { Fail "$tag already exists on origin; bump the version instead of moving a published tag" }
+$tagExists = -not [string]::IsNullOrWhiteSpace((& git ls-remote --tags origin $tag))
+$releaseExists = $false
+if ($tagExists) {
+    & gh release view $tag --json tagName *> $null
+    if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
+}
+
+if ($tagExists -and $releaseExists -and -not $Force) {
+    Fail "$tag is already published; bump the version to release something new"
+}
+if ($tagExists -and -not $releaseExists -and -not $Force -and -not $Retrigger) {
+    Fail ("the tag {0} exists on origin but no release was published for it - a workflow that never started looks exactly like this. Fix the reason (for example an account/billing problem in GitHub Settings), then re-run with -Retrigger." -f $tag)
+}
+if ($Retrigger -and $releaseExists) {
+    Fail "a release for $tag already exists; -Retrigger would not change it"
+}
+if ($Retrigger -and -not $tagExists) {
+    Warn "nothing to retrigger: $tag is not on origin, so a normal run will create it"
+}
 
 # ---------------------------------------------------------------- the release
 if ($DryRun) { Say "dry run: nothing will be pushed, tagged or released" }
@@ -125,6 +150,11 @@ if ($Force) {
     Say "moving the tag $tag (forced)"
     Git @('tag', '-f', '-a', $tag, '-m', "Ducky Can Shoot $Version") | Out-Null
     Git @('push', '--force', 'origin', $tag) | Out-Null
+} elseif ($Retrigger -and $tagExists) {
+    Say "deleting and re-pushing $tag to start the release workflow again"
+    Git @('push', 'origin', ":refs/tags/$tag") | Out-Null
+    Git @('tag', '-f', '-a', $tag, '-m', "Ducky Can Shoot $Version") | Out-Null
+    Git @('push', 'origin', $tag) | Out-Null
 } else {
     Say "creating and pushing the tag $tag"
     Git @('tag', '-a', $tag, '-m', "Ducky Can Shoot $Version") | Out-Null
