@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/tests-910%20passing-brightgreen" alt="910 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
-  <img src="https://img.shields.io/badge/status-0.2.4%20alpha-orange" alt="Status: 0.2.4 alpha">
+  <img src="https://img.shields.io/badge/status-0.3.0%20alpha-orange" alt="Status: 0.3.0 alpha">
   <img src="https://img.shields.io/badge/AI--assisted-partially-8957e5" alt="Partially AI assisted">
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="Pull requests welcome"></a>
 </p>
@@ -146,7 +146,7 @@ Or, on Debian and Ubuntu, from the `.deb` of a release (see
 [the releases page](https://github.com/Linux-Alex/ducky-can-shoot/releases)):
 
 ```bash
-sudo apt install ./ducky-can-shoot_0.2.4-1_all.deb
+sudo apt install ./ducky-can-shoot_0.3.0-1_all.deb
 ```
 
 Or - on any distribution, with nothing installed first - take the **AppImage**.
@@ -154,9 +154,9 @@ It carries Python, Qt, Kirigami, ClamAV and a signature database inside the
 image, so the machine needs none of them:
 
 ```bash
-chmod +x DuckyCanShoot-0.2.4-x86_64.AppImage
-./DuckyCanShoot-0.2.4-x86_64.AppImage            # the interface
-./DuckyCanShoot-0.2.4-x86_64.AppImage scan /media/$USER/STICK
+chmod +x DuckyCanShoot-0.3.0-x86_64.AppImage
+./DuckyCanShoot-0.3.0-x86_64.AppImage            # the interface
+./DuckyCanShoot-0.3.0-x86_64.AppImage scan /media/$USER/STICK
 ```
 
 Every release also carries a `SHA256SUMS` file and a signed build provenance
@@ -237,7 +237,7 @@ $ dcs run --device /dev/sdb1 --to someone@example.org --yes
 ==> email: notifying someone@example.org
      email            ok                    00:01 - sent to someone@example.org
 
-VERDICT: INFECTED    Ducky Can Shoot 0.2.4
+VERDICT: INFECTED    Ducky Can Shoot 0.3.0
 ------------------------------------------------------------------------
   medium        : SANDISK16 (/run/media/aleks/SANDISK16)
   files scanned : 12,480 (3.4 GiB)
@@ -453,7 +453,7 @@ enabled:
 
 ```bash
 make deb
-sudo apt install ./dist/ducky-can-shoot_0.2.4-1_all.deb
+sudo apt install ./dist/ducky-can-shoot_0.3.0-1_all.deb
 man dcs
 ```
 
@@ -532,7 +532,7 @@ packaging/             desktop entry and icon
   including the optional YARA and hash-intelligence engines
 - [docs/CLI.md](docs/CLI.md): the command line reference
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): when something does not work
-- [docs/ROADMAP.md](docs/ROADMAP.md): what 0.2.4 provides, the known limitations, the 0.3 milestone (encrypted uploads and job history) and the ideas that are not committed
+- [docs/ROADMAP.md](docs/ROADMAP.md): what the project provides today, the known limitations, the next milestone and the ideas that are not committed
 
 ## Contributing
 

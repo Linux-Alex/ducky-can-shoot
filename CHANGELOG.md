@@ -8,6 +8,10 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-11-15
+
 The 0.3 milestone from [the roadmap](docs/ROADMAP.md): a private, reviewable
 workflow. It collects the two features the roadmap sequences as 0.3.0 (encrypted
 uploads) and 0.3.1 (job history), plus the release-quality work that preceded
@@ -533,7 +537,8 @@ First release. Everything below is new.
 - Nothing found on the medium is ever executed, and the medium is never written
   to.
 
-[Unreleased]: https://github.com/Linux-Alex/ducky-can-shoot/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Linux-Alex/ducky-can-shoot/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.3.0
 [0.2.4]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.2.4
 [0.2.3]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.2.3
 [0.2.2]: https://github.com/Linux-Alex/ducky-can-shoot/releases/tag/v0.2.2
