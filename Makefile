@@ -7,7 +7,7 @@ RUFF ?= ruff
 PYTHONPATH := src$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 .DEFAULT_GOAL := help
-.PHONY: help run cli test test-gui lint typecheck format build deb version install uninstall doctor clean screenshots icons
+.PHONY: help run cli test test-gui lint typecheck format build deb artifacts version install uninstall doctor clean screenshots icons
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -36,6 +36,9 @@ format: ## Apply the safe ruff fixes
 
 build: ## Build the sdist and the wheel into dist/
 	$(PYTHON) -m build
+
+artifacts: ## Build the wheel, sdist, .deb and SHA256SUMS into dist/ (release.sh)
+	./scripts/release.sh
 
 install: ## Install for the current user (~/.local, desktop entry and icon)
 	./scripts/install.sh

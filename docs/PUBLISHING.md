@@ -58,18 +58,55 @@ That one command
   the quick start and the sample transcript. A README that advertises the
   previous release is the first thing a visitor reads wrong.
 
-Then:
+Then run the checks and commit the bump:
 
 ```bash
 make test                           # the suite, before anything else
 mypy                                # configured in pyproject.toml, run by CI too
 git diff                            # review what moved
-git commit -am "Ducky Can Shoot 0.2.0"
-git push
-
-git tag -a v0.2.0 -m "Ducky Can Shoot 0.2.0"
-git push origin v0.2.0              # <- this is the release
+git commit -am "Ducky Can Shoot 0.3.0"
 ```
+
+### Publishing from Linux: `scripts/release.sh`
+
+One script builds what the machine can build, checks the tree and (optionally)
+tags and pushes:
+
+```bash
+./scripts/release.sh --check        # pytest, ruff and mypy, then the artefacts
+./scripts/release.sh --appimage     # also build the self contained AppImage
+./scripts/release.sh --push         # tag v<version> and push it (starts the release)
+```
+
+It always wipes `dist/` first, because everything in it is attached and
+checksummed, and it writes `SHA256SUMS`. Without `--push` it stops after the
+artefacts and prints the two commands that publish them. The AppImage needs an
+Ubuntu 26.04-like host; when it is left out, the release workflow still builds
+it. The Linux script is therefore the fast local half; the tag push is the same
+everywhere.
+
+### Publishing from Windows: `scripts/release-windows.ps1`
+
+The Linux artefacts are built by GitHub Actions, not on the Windows machine.
+After the bump is committed (on this or another checkout) and pushed, this
+script does the publishing half from PowerShell:
+
+```powershell
+pwsh -File scripts/release-windows.ps1 -DryRun     # show the git/gh commands
+pwsh -File scripts/release-windows.ps1             # push, tag, watch, verify
+```
+
+It verifies that `src/dcs/version.py` and `pyproject.toml` agree, that the tree
+is clean and not behind `origin`, that the tag does not already exist (unless
+`-Force`), pushes the commit and the tag, waits for the release workflow with
+`gh run watch --exit-status`, and then checks that the release carries the
+wheel, the sdist, the `.deb`, the AppImage and `SHA256SUMS`. `-NoWatch` only
+pushes the tag. It needs Git for Windows and the GitHub CLI, logged in
+(`gh auth login`).
+
+Both scripts are thin wrappers around the same three commands; neither invents
+a version or edits the changelog, so a release always starts with
+`scripts/bump-version.py` on a checkout.
 
 The workflow then
 

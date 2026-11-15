@@ -132,6 +132,10 @@ fi
 
 say "writing the SquashFS image"
 find "$APPDIR/usr/lib" -name "*.a" -delete
+# A checkout with a restrictive umask produces 0600 files, and an AppImage that
+# other users cannot read is a broken AppImage; make everything world readable
+# before it is packed.  appimagetool prints one warning per file otherwise.
+chmod -R a+rX "$APPDIR"
 if [ ! -x "$TOOL" ]; then
     mkdir -p "$(dirname "$TOOL")"
     say "downloading appimagetool"
