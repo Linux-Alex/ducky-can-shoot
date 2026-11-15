@@ -66,6 +66,13 @@ class JobRequest:
     assume_yes: bool = False
     archive_format: str = ""
     output_dir: str = ""
+    #: per-run encryption switch; None means "use archive.encrypt"
+    encrypt: bool | None = None
+    #: the passphrase for this run, held in memory only.  It is never stored
+    #: in the configuration, the result or a report: the pipeline hands it to
+    #: the archiver and forgets it.  repr=False keeps it out of a traceback that
+    #: prints the request, and out of any log line built from it.
+    passphrase: str = field(default="", repr=False)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> JobRequest:
@@ -141,12 +148,31 @@ class Pipeline:
             result.duration = time.monotonic() - started
             summary = result.to_dict()
             _refresh_json_report(result, summary)
+            _record_history(self.config, result, sink)
             sink.on_summary(summary)
             sink.on_log(
                 "info",
                 f"job {result.job_id} finished: {result.verdict.value} in {result.duration:.1f}s",
             )
         return result
+
+
+def _record_history(config: AppConfig, result: JobResult, sink: EventSink) -> None:
+    """Put the finished job into the local index, if the user wants one.
+
+    A history that cannot be written must never break a job that otherwise
+    succeeded: the reports and the email are the product, the index is a
+    convenience.  The failure is reported to the live log and the log file.
+    """
+    if not config.history.enabled:
+        return
+    from dcs.core.history import open_history
+
+    try:
+        open_history(config).record(result)
+    except Exception as exc:
+        log.warning("the job was not recorded in the history: %s", exc)
+        sink.on_log("warning", f"the job history could not be updated: {exc}")
 
 
 def _refresh_json_report(result: JobResult, summary: dict[str, Any]) -> None:
@@ -414,6 +440,25 @@ class _RunContext:
         if fmt == "7z" and not archiver.tool_for("7z") and self.config.archive.format != "7z":
             fmt = "zip"
 
+        encrypt = (
+            self.config.archive.encrypt
+            if self.request.encrypt is None
+            else bool(self.request.encrypt)
+        )
+        passphrase = ""
+        if encrypt:
+            passphrase = self.config.archive_passphrase(self.request.passphrase)
+            if not passphrase:
+                reason = (
+                    "the archive was not created: encryption was requested but no passphrase is "
+                    "available (set the environment variable named by archive.passphrase_env, "
+                    "configure archive.passphrase_command, or use --encrypt with a terminal)"
+                )
+                self.result.upload_skipped_reason = reason
+                self.result.warnings.append(reason)
+                self._finish(stage, StageState.FAILED, reason)
+                return
+
         self._begin(stage, "indexing the medium")
         total_files, total_bytes, size_map = plan_source(self.result.source_path)
         self.sink.on_log(
@@ -440,6 +485,13 @@ class _RunContext:
         output_dir = self.request.output_dir or str(self.config.output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
+        if encrypt:
+            self.sink.on_log(
+                "info",
+                "the image will be encrypted (AES-256); the passphrase is not written to "
+                "the report, the configuration or the log - send it to the recipient "
+                "through a different channel",
+            )
         archive = archiver.create(
             self.result.source_path,
             output_dir,
@@ -449,7 +501,12 @@ class _RunContext:
             total_files=total_files,
             total_bytes=total_bytes,
             size_map=size_map,
+            passphrase=passphrase,
+            encrypt=encrypt,
         )
+        # drop the secret as soon as the archiver has it: nothing below can
+        # accidentally put it into a result, a warning or a report
+        passphrase = ""
         self.result.archive = archive
         if not archive.ok:
             self._finish(stage, StageState.FAILED, archive.error or "archive failed")
@@ -466,7 +523,8 @@ class _RunContext:
         self._finish(
             stage,
             StageState.DONE,
-            f"{len(archive.parts)} volume(s), {human_bytes(archive.archive_bytes)}",
+            f"{len(archive.parts)} volume(s), {human_bytes(archive.archive_bytes)}"
+            + (", encrypted (AES-256)" if archive.encrypted else ""),
             archive.duration,
         )
 
@@ -522,10 +580,19 @@ class _RunContext:
 
         parts = self.result.archive.parts
         self._begin(stage, f"uploading {len(parts)} volume(s) to {provider.label}")
-        self.sink.on_log(
-            "warning",
-            f"the file(s) will be publicly reachable by anyone who has the link ({provider.label})",
-        )
+        if self.result.archive is not None and self.result.archive.encrypted:
+            self.sink.on_log(
+                "info",
+                f"the file(s) are encrypted (AES-256), so a link alone does not open them "
+                f"({provider.label})",
+            )
+        else:
+            self.sink.on_log(
+                "warning",
+                f"the file(s) will be publicly reachable by anyone who has the link "
+                f"({provider.label}); set archive.encrypt to make the download useless "
+                "without the passphrase",
+            )
         if len(parts) > 1 and hasattr(provider, "create_folder"):
             try:
                 prefix = self.config.upload.gofile.folder_prefix or "DCS"

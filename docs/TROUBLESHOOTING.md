@@ -291,6 +291,60 @@ Or change `upload.provider` in the config, or export `DCS_PROVIDER=litterbox`.
 Behind a shared NAT or a VPN the rate limit is shared with everybody else on that
 address, so a different network may work immediately.
 
+### The job stopped at the archive stage because there is no passphrase
+
+Encryption was asked for (`archive.encrypt = true`, `--encrypt`, or the checkbox
+in the interface) and no passphrase could be found. That is deliberate: an image
+that was meant to be private is never produced readable. Pick one of:
+
+```bash
+export DCS_ARCHIVE_PASSPHRASE='...'                  # this session only
+dcs config set archive.passphrase_command 'pass show archive/dcs'
+```
+
+The interface's password field and an interactive `dcs run --encrypt` both prompt
+when there is no configured source. Setting `archive.encrypt = false` (or passing
+`--no-encrypt`) turns encryption off for a run, at the cost of a public image.
+The passphrase is never written to the configuration, the report, the email or the
+log, so a job that needs it twice needs it twice.
+
+### The archive stage says 7z is needed for encryption
+
+AES-256 is a 7z feature. Install `p7zip-full` (Debian/Ubuntu), `p7zip`
+(Fedora/Arch) or turn `archive.encrypt` off. DCS deliberately does not fall back
+to a readable zip when encryption was requested.
+
+### The job says the archive "is not encrypted" and was deleted
+
+DCS listed the freshly created image without a password and the listing
+succeeded, so the 7z binary ignored `-p`/`-mhe` (an old or unusual build). The
+volumes are removed because an unencrypted image of a medium must not be left
+where it could be uploaded by mistake. Check `7z | head -2`; install
+`p7zip-full` from the distribution rather than a bundled binary.
+
+### The history is empty, or a job is missing from it
+
+The index only records runs that finish, and only when `history.enabled` is true
+(and `--no-history` was not passed). Check where it looks:
+
+```bash
+dcs history path          # the database the current configuration uses
+dcs history list --json   # what it holds right now
+```
+
+If the database cannot be written, the job still succeeds and a warning appears
+in the live log: the reports and the email are the product, the index is a
+convenience. Deleting `history.db` (and its `-wal`/`-shm` files) resets the
+index without touching a single report.
+
+### "database is locked" when several DCS processes run at once
+
+SQLite takes a write lock. DCS sets a ten second busy timeout and a WAL journal,
+so a short overlap is handled; a lock that lasts longer means another process is
+stuck in a long write. Retry, or give that process a moment. Two simultaneous
+jobs are not supported anyway (the safety interlocks assume a human watching one
+medium).
+
 ### The archive does not fit or there is not enough free space
 
 ```text

@@ -116,6 +116,18 @@ def render_email_html(result: JobResult) -> str:
         Verdict.CANCELLED: "The scan was cancelled before it finished.",
     }.get(result.verdict, "")
 
+    encrypted = bool(result.archive and result.archive.encrypted)
+    if encrypted:
+        access_note = (
+            "The archive is encrypted (AES-256): downloading it is not enough, the passphrase "
+            "is required. The passphrase is deliberately not in this email - the sender has to "
+            "give it to you through another channel."
+        )
+    else:
+        access_note = (
+            "Anyone with this link can download the archive. The host deletes it automatically "
+            "after its retention period."
+        )
     link_block = ""
     if result.share_link:
         link_block = (
@@ -126,8 +138,7 @@ def render_email_html(result: JobResult) -> str:
             f'<div style="margin-top:6px;word-break:break-all;"><a href="{_esc(result.share_link)}" '
             f'style="color:#1d7fb8;font-size:15px;">{_esc(result.share_link)}</a></div>'
             '<div style="margin-top:8px;font-size:12px;color:#7a7d80;">'
-            "Anyone with this link can download the archive. The host deletes it automatically after "
-            "its retention period.</div></div></td></tr>"
+            f"{_esc(access_note)}</div></div></td></tr>"
         )
     elif result.upload_skipped_reason:
         link_block = (
@@ -151,6 +162,7 @@ def render_email_html(result: JobResult) -> str:
         ("Threatening files", f"{result.threat_count:,}"),
         ("Findings", f"{len(result.findings):,}"),
         ("Archive", human_bytes(result.archive_bytes) if result.archive and result.archive.ok else "not created"),
+        ("Encryption", "AES-256" if encrypted else "none"),
         ("Duration", human_duration(result.duration)),
     ]
     stat_rows = "".join(
@@ -206,8 +218,14 @@ def render_email_text(result: JobResult) -> str:
         f"Job          : {result.job_id}",
     ]
     if result.share_link:
-        lines += ["", f"Archive download: {result.share_link}",
-                  "Anyone with this link can download the archive."]
+        lines += ["", f"Archive download: {result.share_link}"]
+        if result.archive and result.archive.encrypted:
+            lines += [
+                "The archive is encrypted (AES-256); the passphrase is not in this message "
+                "and is sent through another channel."
+            ]
+        else:
+            lines += ["Anyone with this link can download the archive."]
     elif result.upload_skipped_reason:
         lines += ["", f"Not uploaded: {result.upload_skipped_reason}"]
     if result.findings:

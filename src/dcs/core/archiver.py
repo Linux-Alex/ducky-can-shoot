@@ -12,6 +12,7 @@ Design notes
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -76,6 +77,11 @@ class ArchiveResult:
     command: list[str] = field(default_factory=list)
     error: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: the image is AES-256 encrypted; the passphrase is deliberately not part
+    #: of this object, so it cannot reach a report, a log line or the JSON
+    encrypted: bool = False
+    encryption: str = ""
+    headers_encrypted: bool = False
 
     @property
     def archive_bytes(self) -> int:
@@ -111,6 +117,9 @@ class ArchiveResult:
             "command": list(self.command),
             "error": self.error,
             "warnings": list(self.warnings),
+            "encrypted": self.encrypted,
+            "encryption": self.encryption,
+            "headersEncrypted": self.headers_encrypted,
         }
 
 
@@ -184,26 +193,62 @@ class Archiver:
         total_files: int = 0,
         total_bytes: int = 0,
         size_map: dict[str, int] | None = None,
+        passphrase: str = "",
+        encrypt: bool | None = None,
     ) -> ArchiveResult:
         sink = sink or NullSink()
         cancel = cancel or threading.Event()
         result = ArchiveResult(tool="python-zipfile")
         fmt = self.config.format if self.config.format in ("zip", "7z") else "zip"
+        want_encrypt = self.config.encrypt if encrypt is None else bool(encrypt)
 
         os.makedirs(dest_dir, exist_ok=True)
         result.source_files = total_files
         result.source_bytes = total_bytes
 
-        # Resolve the tool *before* deciding on the file name: when 7z is
-        # configured but missing the job falls back to zip, and both the tool
-        # and the extension have to follow, otherwise DCS would write a zip
-        # archive called .7z.
-        tool = self.tool_for(fmt)
-        if not tool and fmt == "7z":
-            result.warnings.append("7z is not installed: falling back to a zip archive")
-            fmt = "zip"
-            name = os.path.splitext(name)[0] + ".zip"
-            tool = self.tool_for("zip")
+        if want_encrypt:
+            # Encryption is a promise, not a preference: when it cannot be kept
+            # the stage fails instead of quietly producing a readable image.
+            if not passphrase:
+                result.error = (
+                    "archive encryption was requested but there is no passphrase: "
+                    "set the environment variable named by archive.passphrase_env "
+                    "(DCS_ARCHIVE_PASSPHRASE by default), configure "
+                    "archive.passphrase_command, or pass --passphrase-command"
+                )
+                sink.on_stage(Stage.ARCHIVE, StageState.FAILED, result.error)
+                return result
+            if "\n" in passphrase or "\r" in passphrase:
+                result.error = "the passphrase must not contain a line break"
+                sink.on_stage(Stage.ARCHIVE, StageState.FAILED, result.error)
+                return result
+            if fmt != "7z":
+                # AES-256 is a 7z feature; switching the format beats silently
+                # ignoring the request, and the extension has to follow
+                result.warnings.append(
+                    "encryption needs the 7z format; the image is a .7z archive instead of .zip"
+                )
+                fmt = "7z"
+                name = os.path.splitext(name)[0] + ".7z"
+            tool = self.tool_for("7z")
+            if not tool:
+                result.error = (
+                    "archive encryption needs the 7z binary (p7zip-full); install it "
+                    "or turn archive.encrypt off"
+                )
+                sink.on_stage(Stage.ARCHIVE, StageState.FAILED, result.error)
+                return result
+        else:
+            # Resolve the tool *before* deciding on the file name: when 7z is
+            # configured but missing the job falls back to zip, and both the tool
+            # and the extension have to follow, otherwise DCS would write a zip
+            # archive called .7z.
+            tool = self.tool_for(fmt)
+            if not tool and fmt == "7z":
+                result.warnings.append("7z is not installed: falling back to a zip archive")
+                fmt = "zip"
+                name = os.path.splitext(name)[0] + ".zip"
+                tool = self.tool_for("zip")
 
         target = os.path.join(dest_dir, name)
         ok, problem = self.check_capacity(dest_dir, total_bytes)
@@ -219,14 +264,29 @@ class Archiver:
             Stage.ARCHIVE,
             StageState.RUNNING,
             f"creating {os.path.basename(target)} from {total_files} files "
-            f"({human_bytes(total_bytes)})",
+            f"({human_bytes(total_bytes)})"
+            + (" (encrypted)" if want_encrypt else ""),
         )
 
         if tool:
             result.tool = "7z" if fmt == "7z" else "zip"
             return self._run_tool(
-                tool, fmt, root, target, sink, cancel, meter, result, total_files, total_bytes, size_map
+                tool,
+                fmt,
+                root,
+                target,
+                sink,
+                cancel,
+                meter,
+                result,
+                total_files,
+                total_bytes,
+                size_map,
+                passphrase=passphrase if want_encrypt else "",
+                encrypt=want_encrypt,
             )
+        # No tool at all: only reachable without encryption, because the
+        # encryption branch above already refused to continue.
         if self.config.split_size_mb:
             result.warnings.append(
                 "no zip or 7z binary is installed, so the archive cannot be split; "
@@ -237,18 +297,30 @@ class Archiver:
         )
 
     # -- external tools ---------------------------------------------------
-    def _build_command(self, tool: str, fmt: str, target: str) -> list[str]:
+    def _build_command(
+        self, tool: str, fmt: str, target: str, *, encrypt: bool = False
+    ) -> list[str]:
         """Build the argv; the tool always walks the current directory itself.
 
         Letting zip/7z discover the files instead of feeding them a list keeps
         the command line short, avoids a second enumeration and lets both tools
         stream: memory stays flat no matter how large the medium is.
+
+        The passphrase never appears here: -p without a value makes 7z read it
+        from standard input, so it stays out of /proc/<pid>/cmdline and out of
+        the shell history.  Header encryption (-mhe) is what keeps the file
+        names - which are often the sensitive part - unreadable as well.
         """
         level = max(0, min(9, self.config.compression_level))
         if fmt == "7z":
-            argv = [tool, "a", "-t7z", f"-mx={level}", "-y", "-bb1", target, "."]
+            argv = [tool, "a", "-t7z", f"-mx={level}", "-y", "-bb1"]
             if self.config.split_size_mb:
                 argv.insert(3, f"-v{self.config.split_size_mb}m")
+            if encrypt:
+                argv.append("-p")
+                if self.config.encrypt_headers:
+                    argv.append("-mhe=on")
+            argv += [target, "."]
         else:
             argv = [tool, "-r", f"-{level}", "-y"]
             if self.config.split_size_mb:
@@ -269,11 +341,14 @@ class Archiver:
         total_files: int,
         total_bytes: int,
         size_map: dict[str, int] | None,
+        *,
+        passphrase: str = "",
+        encrypt: bool = False,
     ) -> ArchiveResult:
         started = time.monotonic()
         sizes: dict[str, int] = size_map if size_map else {}
         try:
-            argv = self._build_command(tool, fmt, target)
+            argv = self._build_command(tool, fmt, target, encrypt=encrypt)
             result.command = argv
             env = dict(os.environ)
             env["LC_ALL"] = "C"
@@ -283,12 +358,26 @@ class Archiver:
                 cwd=root,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                errors="replace",
-                bufsize=1,
+                # An encrypted archive takes its password from this pipe: -p
+                # without a value is the only way to keep it out of argv.
+                stdin=subprocess.PIPE if encrypt else subprocess.DEVNULL,
+                text=not encrypt,
+                errors=None if encrypt else "replace",
+                bufsize=1 if not encrypt else -1,
                 env=env,
             )
+            if encrypt and proc.stdin is not None:
+                # 7z asks once; p7zip asks once and then again to verify.  Two
+                # lines cover both, and the extra one stays unread otherwise.
+                payload = (passphrase + "\n" + passphrase + "\n").encode("utf-8")
+                try:
+                    proc.stdin.write(payload)
+                    proc.stdin.flush()
+                except (BrokenPipeError, OSError):  # pragma: no cover - tool exited early
+                    pass
+                finally:
+                    with contextlib.suppress(OSError):
+                        proc.stdin.close()
             processed_files = 0
             processed_bytes = 0
             assert proc.stdout is not None
@@ -296,6 +385,8 @@ class Archiver:
                 if cancel.is_set():
                     proc.terminate()
                     break
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", "replace")
                 line = raw.rstrip()
                 match = _PROGRESS_LINE.match(line)
                 if not match:
@@ -346,6 +437,24 @@ class Archiver:
             return result
         if returncode not in (0, 1, 18):  # 1 = warnings, 18 = some files unreadable
             result.warnings.append(f"{os.path.basename(tool)} exited with code {returncode}")
+
+        if encrypt:
+            encrypted, detail = self._probe_encryption(tool, result.primary_path)
+            if not encrypted:
+                # An image that was meant to be private must never be uploaded
+                # or kept as if it were; deleting it is the only safe outcome.
+                self._discard_parts(result)
+                result.error = (
+                    f"the archive was created but is not encrypted ({detail}); "
+                    "it was deleted"
+                )
+                sink.on_stage(Stage.ARCHIVE, StageState.FAILED, result.error)
+                return result
+            result.encrypted = True
+            result.encryption = "AES-256"
+            result.headers_encrypted = self.config.encrypt_headers
+            if detail:
+                result.warnings.append(detail)
 
         result.ok = True
         sink.on_progress(
@@ -435,6 +544,57 @@ class Archiver:
         return result
 
     # -- helpers ----------------------------------------------------------
+    @staticmethod
+    def _probe_encryption(tool: str, path: str) -> tuple[bool, str]:
+        """Check that the image really cannot be opened without a password.
+
+        The test never needs the passphrase: an archive whose headers are
+        encrypted cannot be listed at all, and one whose headers are readable
+        still names AES-256 for every member.  Anything else is reported as
+        not encrypted, which makes the caller fail the stage.
+        """
+        if not path or not os.path.exists(path):
+            return False, "the archive is missing"
+        argv = [tool, "l", "-slt", "--", path]
+        env = dict(os.environ)
+        env["LC_ALL"] = "C"
+        env["LANG"] = "C"
+        try:
+            proc = subprocess.run(
+                argv,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=300,
+                check=False,
+                env=env,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:  # pragma: no cover - defensive
+            return False, f"could not inspect the archive: {exc}"
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if proc.returncode != 0 or "Cannot open encrypted archive" in output:
+            # the headers themselves are encrypted: even the file names need
+            # the passphrase, which is the strongest case
+            return True, ""
+        if "Encrypted = +" in output:
+            return True, (
+                "the archive contents are encrypted but its file names can be read "
+                "without the password (archive.encrypt_headers is off)"
+            )
+        return False, "7z listed the archive without asking for a password"
+
+    @staticmethod
+    def _discard_parts(result: ArchiveResult) -> None:
+        """Remove the volumes of an archive that must not be used."""
+        for part in result.parts:
+            try:
+                os.unlink(part.path)
+            except OSError as exc:  # pragma: no cover - defensive
+                log.warning("cannot delete %s: %s", part.path, exc)
+        result.parts = []
+        result.ok = False
+
     @staticmethod
     def _collect_parts(target: str, fmt: str) -> list[ArchivePart]:
         """Find every volume the tool produced, in upload order."""

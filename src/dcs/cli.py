@@ -214,6 +214,12 @@ def format_result(result: dict[str, Any]) -> str:
     if archive.get("ok"):
         lines.append(f"  archive       : {archive.get('archiveBytesText')} in {archive.get('partCount')} file(s)")
         lines.append(f"                  {archive.get('primaryPath')}")
+        if archive.get("encrypted"):
+            lines.append(
+                "                  encrypted (AES-256); the passphrase is not in this report"
+            )
+        else:
+            lines.append("                  not encrypted: anyone with the file can read it")
         covered.add("archive")
     if result.get("shareLink"):
         lines.append(f"  share link    : {result['shareLink']}")
@@ -240,9 +246,9 @@ def format_result(result: dict[str, Any]) -> str:
         stage = str(timing.get("stage", ""))
         if stage in covered or timing.get("state") not in ("skipped", "failed"):
             continue
-        palette = "red" if timing.get("state") == "failed" else None
+        tone = "red" if timing.get("state") == "failed" else ""
         text = f"  {stage:<13} : {timing.get('message', '')}"
-        lines.append(colour(text, palette) if palette else text)
+        lines.append(colour(text, tone) if tone else text)
     warnings = result.get("warnings") or []
     if warnings:
         lines.append("  notes:")
@@ -601,6 +607,44 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return exit_code_for(result.verdict.value)
 
 
+def resolve_passphrase(config: Any, *, wanted: bool) -> tuple[str, str]:
+    """Find the archive passphrase for this run, asking the terminal if needed.
+
+    Returns (passphrase, error).  The passphrase is never written anywhere:
+    it goes into the JobRequest, the archiver consumes it, and the report and
+    the log only ever say that the archive is encrypted.
+    """
+    if not wanted:
+        return "", ""
+    found = config.archive_passphrase("")
+    if found:
+        return found, ""
+    if sys.stdin.isatty() and sys.stderr.isatty():
+        import getpass
+
+        print(
+            "The archive will be encrypted (AES-256). The passphrase is not saved and "
+            "is not included in the report or the email; send it to the recipient "
+            "through another channel.",
+            file=sys.stderr,
+        )
+        try:
+            first = getpass.getpass("Passphrase: ")
+            second = getpass.getpass("Repeat the passphrase: ")
+        except (EOFError, KeyboardInterrupt):
+            return "", "no passphrase was entered, so nothing was archived"
+        if not first:
+            return "", "the passphrase was empty, so nothing was archived"
+        if first != second:
+            return "", "the two passphrases did not match, so nothing was archived"
+        return first, ""
+    return "", (
+        "encryption was requested but there is no passphrase and no terminal to ask on: "
+        f"set {config.archive.passphrase_env} in the environment, or configure "
+        "archive.passphrase_command"
+    )
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     apply_engine_flags(config, args)
@@ -610,21 +654,49 @@ def cmd_run(args: argparse.Namespace) -> int:
         config.upload.enabled = False
     if args.no_email:
         config.email.enabled = False
+    if args.no_history:
+        config.history.enabled = False
+    if args.passphrase_env:
+        config.archive.passphrase_env = args.passphrase_env
+    if args.passphrase_command:
+        config.archive.passphrase_command = args.passphrase_command
     recipients = parse_paths(args.to)
     if recipients:
         config.email.to_addrs = recipients
+
+    encrypt: bool | None = None
+    if args.encrypt:
+        encrypt = True
+    if args.no_encrypt:
+        encrypt = False
+    # ask for the passphrase only when this run can actually build an archive:
+    # prompting before "you forgot --path" would be a strange first question
+    archives = (
+        not args.no_archive
+        and config.archive.enabled
+        and config.archive.when != "never"
+    )
+    wanted = config.archive.encrypt if encrypt is None else encrypt
+    passphrase, passphrase_error = resolve_passphrase(
+        config, wanted=bool(wanted) and archives
+    )
+    if passphrase_error:
+        print(colour(f"error: {passphrase_error}", "red"), file=sys.stderr)
+        return EXIT_ERROR
 
     request = JobRequest(
         source_path=args.path or args.device or "",
         device_path=args.device or "",
         label=args.label or "",
         do_archive=None if not args.no_archive else False,
-        do_upload=None if not args.no_upload else False,
-        do_email=None if not args.no_email else False,
+        do_upload=None if args.no_upload else False,
+        do_email=None if args.no_email else False,
         recipients=recipients,
         email_dry_run=args.dry_run_email,
         assume_yes=args.yes,
         output_dir=args.output_dir or "",
+        encrypt=encrypt,
+        passphrase=passphrase,
     )
     if not request.source_path and not request.device_path:
         print("Select a device with --device or a folder with --path.", file=sys.stderr)
@@ -691,10 +763,40 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         ("lsblk", "Install util-linux: it is what detects removable media."),
         ("udisksctl", "Install udisks2 so a stick can be mounted without root."),
         ("zip", "Install zip, or DCS falls back to its slower built-in archiver."),
-        ("7z", "Optional: only needed for 7z archives."),
+        ("7z", "Install p7zip-full: it is needed for 7z archives and for encryption."),
     ):
         path = shutil.which(tool)
         add(f"tool {tool}", bool(path), path or "not found", hint)
+
+    # Uploading an unencrypted image to an anonymous host is the sharpest edge
+    # of the workflow, so the doctor states the current situation instead of
+    # leaving it to a warning the user may never read.  A recommendation is not
+    # a failure: `ok` only says whether the configured behaviour can work.
+    can_encrypt = bool(shutil.which("7z"))
+    if not config.upload.enabled:
+        add("upload privacy", True, "uploading is disabled: nothing leaves the machine")
+    elif config.archive.encrypt:
+        has_source = bool(config.archive_passphrase("")) or bool(config.archive.passphrase_command)
+        detail = "archives are encrypted (AES-256)"
+        if not can_encrypt:
+            detail = "archive.encrypt is on but 7z is missing: archiving will fail"
+        elif not has_source:
+            detail += "; no passphrase source is configured, so a job will ask or fail"
+        add(
+            "upload privacy",
+            can_encrypt,
+            detail,
+            "Install p7zip-full and provide the passphrase through "
+            f"{config.archive.passphrase_env} or archive.passphrase_command.",
+        )
+    else:
+        add(
+            "upload privacy",
+            True,
+            "recommended: uploads are unencrypted, so anyone with a link can read the image",
+            "Set archive.encrypt = true (Settings, Archiving) to make the download "
+            "useless without the passphrase.",
+        )
 
     for label, directory in (("output", str(config.output_dir)), ("reports", str(config.reports_dir))):
         try:
@@ -806,6 +908,227 @@ def cmd_engines(args: argparse.Namespace) -> int:
         for warning in status["warnings"]:
             print(f"  warning: {warning}")
     return EXIT_CLEAN
+
+
+HISTORY_ACTIONS = ("list", "show", "open", "delete", "clear", "prune", "path")
+
+
+def _confirm(question: str) -> bool:
+    """Ask a yes/no question; a non-interactive run answers no."""
+    if not sys.stdin.isatty():
+        return False
+    try:
+        answer = input(f"{question} [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer in ("y", "yes")
+
+
+def _history_opener(path: str) -> bool:
+    """Open a stored report in the desktop's default application."""
+    opener = shutil.which("xdg-open")
+    if not opener:
+        print(path)
+        print("No xdg-open on this machine: the path above is the report.", file=sys.stderr)
+        return False
+    try:
+        subprocess.Popen(
+            [opener, path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError as exc:
+        print(f"error: cannot open {path}: {exc}", file=sys.stderr)
+        return False
+    return True
+
+
+def format_history_table(entries: list[Any]) -> str:
+    """The list view: one line per job, never the contents of a report."""
+    if not entries:
+        return "No jobs in the history yet. Run 'dcs run' or a job from the interface."
+    header = (
+        f"{'JOB':<13} {'STARTED':<20} {'VERDICT':<11} {'LABEL':<24} "
+        f"{'FILES':>7} {'FIND':>5} {'THREAT':>6} {'ARCHIVE':>9} ENC"
+    )
+    lines = [header, "-" * len(header)]
+    palette = {"clean": "green", "suspicious": "yellow", "infected": "red"}
+    for entry in entries:
+        started = (entry.started_at or "").replace("T", " ")[:19] or "-"
+        label = entry.label or os.path.basename(entry.source_path.rstrip("/")) or "-"
+        if len(label) > 24:
+            label = label[:23] + "…"
+        verdict = entry.verdict or "-"
+        padded = f"{verdict:<11}"
+        lines.append(
+            f"{entry.job_id:<13} {started:<20} {colour(padded, palette.get(verdict, 'dim'))} "
+            f"{label:<24} {entry.files_scanned:>7,} {entry.finding_count:>5,} "
+            f"{entry.threat_count:>6,} {human_bytes(entry.archive_bytes):>9} "
+            f"{'yes' if entry.archive_encrypted else '-':>3}"
+        )
+    return "\n".join(lines)
+
+
+def format_history_entry(entry: Any) -> str:
+    """The detail view of one stored job."""
+    lines = [
+        f"Job        : {entry.job_id}",
+        f"Started    : {entry.started_at or '-'}",
+        f"Finished   : {entry.finished_at or '-'}",
+        f"Duration   : {human_duration(entry.duration)}",
+        f"Medium     : {entry.label or '-'} ({entry.source_path or '-'})",
+        f"Verdict    : {entry.verdict or '-'}",
+        f"Files      : {entry.files_scanned:,} ({human_bytes(entry.bytes_scanned)})",
+        f"Findings   : {entry.finding_count:,} ({entry.threat_count:,} threatening)",
+        f"Archive    : {entry.archive_path or 'not created'}",
+        "Encrypted  : "
+        + ("AES-256 (the passphrase is not stored)" if entry.archive_encrypted else "no"),
+    ]
+    if entry.archive_sha256:
+        lines.append(f"Archive sha: {entry.archive_sha256}")
+    if entry.share_link:
+        lines.append(f"Share link : {entry.share_link}")
+    if entry.upload_provider:
+        lines.append(f"Host       : {entry.upload_provider}")
+    if entry.engines:
+        engines = ", ".join(
+            f"{item.get('label') or item.get('id')} {item.get('version') or ''}".strip()
+            for item in entry.engines
+            if item.get("available", True)
+        )
+        if engines:
+            lines.append(f"Engines    : {engines}")
+    reports = entry.to_dict()["reports"]
+    for kind, path in reports.items():
+        if path:
+            lines.append(f"Report {kind:<4}: {path}")
+    if entry.findings:
+        lines.append("")
+        lines.append(f"Findings ({len(entry.findings)}):")
+        for item in entry.findings:
+            digest = f" sha256 {item['sha256'][:16]}…" if item.get("sha256") else ""
+            lines.append(f"  [{str(item.get('severity', '')).upper():8}] {item.get('path', '')}{digest}")
+    lines.append("")
+    lines.append(f"Recorded at: {entry.recorded_at or '-'}")
+    return "\n".join(lines)
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    from dcs.core.history import HistoryError, open_history
+
+    config = load_config(args.config)
+    try:
+        store = open_history(config)
+    except HistoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    action = args.action
+    if action == "path":
+        print(store.path)
+        return EXIT_CLEAN
+
+    if action == "list":
+        # Reading an index that does not exist yet must not create one: a user
+        # looking for yesterday's result should not leave a database behind.
+        if not store.path.exists() and not (args.query or args.verdict):
+            entries = []
+            total = 0
+        else:
+            try:
+                entries = store.list_jobs(
+                    args.query or "", verdict=args.verdict or "", limit=args.limit
+                )
+                total = store.count()
+            except HistoryError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return EXIT_ERROR
+        if args.json:
+            print(json.dumps([entry.to_dict() for entry in entries], indent=2, ensure_ascii=False))
+        else:
+            print(format_history_table(entries))
+            print()
+            print(
+                f"{store.path} · {total:,} job(s) · retention: "
+                + (f"{config.history.max_jobs or 'no'} job(s)" if config.history.max_jobs else "no job limit")
+                + ", "
+                + (f"{config.history.max_age_days} day(s)" if config.history.max_age_days else "no age limit")
+            )
+        return EXIT_CLEAN
+
+    if action in ("show", "open", "delete"):
+        if not args.job_id:
+            print(f"usage: dcs history {action} JOBID", file=sys.stderr)
+            return EXIT_ERROR
+        try:
+            entry = store.get(args.job_id)
+        except HistoryError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        if entry is None:
+            print(f"error: no job {args.job_id!r} in the history", file=sys.stderr)
+            return EXIT_ERROR
+        if action == "show":
+            print(
+                json.dumps(entry.to_dict(), indent=2, ensure_ascii=False)
+                if args.json
+                else format_history_entry(entry)
+            )
+            return EXIT_CLEAN
+        if action == "open":
+            report = entry.report_html or entry.report_text or entry.report_json
+            if not report:
+                print("error: this job has no stored report", file=sys.stderr)
+                return EXIT_ERROR
+            return EXIT_CLEAN if _history_opener(report) else EXIT_ERROR
+        # delete
+        if not args.yes and not _confirm(f"Delete job {entry.job_id} from the history?"):
+            print("Nothing was deleted.")
+            return EXIT_CLEAN
+        deleted = store.delete(entry.job_id)
+        print(
+            f"Deleted {entry.job_id}." if deleted else f"{entry.job_id} was already gone."
+        )
+        return EXIT_CLEAN
+
+    if action == "clear":
+        count = store.count()
+        if not count:
+            print("The history is already empty.")
+            return EXIT_CLEAN
+        if not args.yes:
+            print(
+                f"This deletes {count:,} job record(s) from {store.path}. "
+                "The report files on disk are kept; only the index goes away.",
+                file=sys.stderr,
+            )
+            if not sys.stdin.isatty():
+                print("Refusing to clear a non-interactive history without --yes.", file=sys.stderr)
+                return EXIT_ERROR
+            try:
+                answer = input("Type 'clear' to confirm: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer != "clear":
+                print("Nothing was deleted.")
+                return EXIT_CLEAN
+        cleared = store.clear()
+        print(f"Cleared {cleared:,} job record(s) from {store.path}.")
+        return EXIT_CLEAN
+
+    if action == "prune":
+        pruned = store.prune()
+        print(
+            f"Removed {pruned:,} job record(s); "
+            f"{store.count():,} remain in {store.path}."
+        )
+        return EXIT_CLEAN
+
+    print(f"error: unknown history action {action!r}", file=sys.stderr)  # pragma: no cover
+    return EXIT_ERROR
 
 
 def cmd_providers(args: argparse.Namespace) -> int:
@@ -1153,9 +1476,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="send unknown files to the provider for analysis (needs an API key)",
     )
     run.add_argument("--output-dir", help="where the archive is written")
+    run.add_argument(
+        "--encrypt",
+        action="store_true",
+        help="encrypt the archive (7z AES-256) before it can be uploaded; asks for the "
+        "passphrase unless archive.passphrase_env or archive.passphrase_command provides it",
+    )
+    run.add_argument(
+        "--no-encrypt",
+        action="store_true",
+        help="do not encrypt the archive even when archive.encrypt is on",
+    )
+    run.add_argument(
+        "--passphrase-env",
+        metavar="NAME",
+        help="environment variable that holds the archive passphrase "
+        "(default: archive.passphrase_env)",
+    )
+    run.add_argument(
+        "--passphrase-command",
+        metavar="CMD",
+        help="helper command that prints the archive passphrase (never saved)",
+    )
     run.add_argument("--no-archive", action="store_true", help="skip the archive stage")
     run.add_argument("--no-upload", action="store_true", help="never upload anything")
     run.add_argument("--no-email", action="store_true", help="do not send the email")
+    run.add_argument(
+        "--no-history",
+        action="store_true",
+        help="do not record this job in the local history",
+    )
     run.add_argument("--dry-run-email", action="store_true", help="write the message to disk instead")
     run.add_argument("--yes", action="store_true", help="do not ask anything, upload even so")
     run.add_argument("--json", action="store_true")
@@ -1183,6 +1533,35 @@ def build_parser() -> argparse.ArgumentParser:
     providers = subparsers.add_parser("providers", help="list the available upload providers")
     providers.add_argument("--json", action="store_true")
     providers.set_defaults(func=cmd_providers)
+
+    history = subparsers.add_parser(
+        "history",
+        help="browse, search and prune the local job index",
+        description="Every finished job is indexed locally (labels, verdicts, counts, "
+        "report paths and the paths and hashes of its findings). Nothing in it is "
+        "uploaded or looked up online. "
+        + "; ".join(HISTORY_ACTIONS)
+        + ".",
+    )
+    history.add_argument(
+        "action",
+        choices=list(HISTORY_ACTIONS),
+        nargs="?",
+        default="list",
+        help="what to do (default: list)",
+    )
+    history.add_argument("job_id", nargs="?", help="job id for show, open and delete")
+    history.add_argument("--limit", type=int, default=20, help="rows to list (default: 20)")
+    history.add_argument("--query", "-q", default="", help="search label, path, verdict, job, hash")
+    history.add_argument(
+        "--verdict",
+        choices=["clean", "suspicious", "infected", "error", "cancelled", ""],
+        default="",
+        help="only jobs with this verdict",
+    )
+    history.add_argument("--yes", action="store_true", help="do not ask before deleting")
+    history.add_argument("--json", action="store_true")
+    history.set_defaults(func=cmd_history)
 
     yara = subparsers.add_parser("yara", help="show or refresh the YARA rule pack")
     yara.add_argument("action", choices=["status", "update"], nargs="?", default="status")

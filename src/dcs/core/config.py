@@ -213,6 +213,16 @@ class ArchiveConfig:
     #: refuse to archive when the target filesystem has less free space than
     #: this fraction of the estimated archive size
     min_free_space_ratio: float = 1.1
+    #: encrypt the image before it can leave the machine (7z, AES-256)
+    encrypt: bool = False
+    #: encrypt the file names as well (-mhe=on); without a passphrase the
+    #: archive cannot even be listed, which is the point of encrypting it
+    encrypt_headers: bool = True
+    #: where the passphrase comes from.  The secret itself is never stored in
+    #: the configuration: only the name of the environment variable and the
+    #: helper command that prints it are.
+    passphrase_env: str = "DCS_ARCHIVE_PASSPHRASE"
+    passphrase_command: str = ""
 
 
 @dataclass
@@ -327,6 +337,24 @@ WATCH_MODES = ("off", "notify", "open", "open_run")
 
 
 @dataclass
+class HistoryConfig:
+    """The local index of finished jobs.
+
+    It records labels, paths and hashes, so it is a record of what a user
+    looked at.  Nothing is ever uploaded or looked up online, and the database
+    stays under the user's data directory.
+    """
+
+    enabled: bool = True
+    #: the database file ("" = $XDG_DATA_HOME/dcs/history.db)
+    database: str = ""
+    #: keep at most this many jobs (0 = no count limit)
+    max_jobs: int = 500
+    #: drop jobs older than this many days (0 = no age limit)
+    max_age_days: int = 365
+
+
+@dataclass
 class WatchConfig:
     """What happens when a human plugs a medium in.
 
@@ -380,6 +408,7 @@ class AppConfig:
     gui: GuiConfig = field(default_factory=GuiConfig)
     watch: WatchConfig = field(default_factory=WatchConfig)
     updates: UpdateConfig = field(default_factory=UpdateConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
     #: where this config was loaded from (informational)
     source_path: str = ""
 
@@ -396,6 +425,14 @@ class AppConfig:
     def work_dir(self) -> Path:
         return default_work_dir()
 
+    @property
+    def history_path(self) -> Path:
+        return (
+            Path(self.history.database).expanduser()
+            if self.history.database
+            else default_data_dir() / "history.db"
+        )
+
     # -- secret resolution ------------------------------------------------
     def resolve_secret(self, value: str, command: str, env_var: str) -> str:
         return resolve_secret(value, command, env_var)
@@ -407,6 +444,20 @@ class AppConfig:
 
     def smtp_username(self) -> str:
         return os.environ.get("DCS_SMTP_USERNAME") or self.email.username
+
+    def archive_passphrase(self, explicit: str = "") -> str:
+        """The passphrase for the encrypted archive, from the first source that has one.
+
+        Order: the value handed to this run (a command line flag or the
+        interface's password field), then the environment variable named by
+        `archive.passphrase_env`, then `archive.passphrase_command`.  The
+        configuration file never holds the secret itself.
+        """
+        if explicit:
+            return explicit
+        return self.resolve_secret(
+            "", self.archive.passphrase_command, self.archive.passphrase_env
+        )
 
     def gofile_token(self) -> str:
         return self.resolve_secret(
@@ -513,6 +564,12 @@ class AppConfig:
             problems.append(f"archive.format must be zip or 7z, not {self.archive.format!r}")
         if self.archive.when not in ("clean", "always", "never"):
             problems.append(f"archive.when must be clean/always/never, not {self.archive.when!r}")
+        if self.history.max_jobs < 0:
+            problems.append(f"history.max_jobs must be 0 or more, not {self.history.max_jobs!r}")
+        if self.history.max_age_days < 0:
+            problems.append(
+                f"history.max_age_days must be 0 or more, not {self.history.max_age_days!r}"
+            )
         if self.report.format not in ("html", "text", "both"):
             problems.append(f"report.format must be html, text or both, not {self.report.format!r}")
         if self.upload.upload_when not in ("clean", "always", "never"):
@@ -635,26 +692,31 @@ def set_option(config: AppConfig, key: str, value: Any) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
-def _build(cls: type, data: dict[str, Any]) -> Any:
+def _build(cls: Any, data: dict[str, Any]) -> Any:
     """Instantiate a (nested) dataclass from a plain dict, ignoring unknowns."""
     if not is_dataclass(cls):
         return data
+    # `cls` is a dataclass *type* here; keeping it in an Any variable stops
+    # mypy from narrowing it to the DataclassInstance union, where neither
+    # calling nor __name__ is defined.
+    target: Any = cls
+    name = getattr(cls, "__name__", cls)
     kwargs: dict[str, Any] = {}
     known = {f.name: f for f in fields(cls)}
     for key, value in data.items():
         spec = known.get(key)
         if spec is None:
-            log.debug("ignoring unknown config key %s.%s", cls.__name__, key)
+            log.debug("ignoring unknown config key %s.%s", name, key)
             continue
         coerced = _coerce(spec.type, value)
         if coerced is UNCONVERTIBLE:
             continue
         kwargs[key] = coerced
     try:
-        return cls(**kwargs)
+        return target(**kwargs)
     except TypeError as exc:  # pragma: no cover - defensive
-        log.error("invalid config for %s: %s", cls.__name__, exc)
-        return cls()
+        log.error("invalid config for %s: %s", name, exc)
+        return target()
 
 
 #: returned by _coerce when a value cannot be converted; callers keep their
@@ -739,6 +801,7 @@ _RESOLVE: dict[str, Any] = {
     "GuiConfig": GuiConfig,
     "WatchConfig": WatchConfig,
     "UpdateConfig": UpdateConfig,
+    "HistoryConfig": HistoryConfig,
 }
 
 
@@ -861,6 +924,7 @@ def load_config(
         "DCS_ENGINES": ("scan", "engines"),
         "DCS_LOOKUP": ("scan.intel", "lookup"),
         "DCS_ARCHIVE_DIR": ("general", "output_dir"),
+        "DCS_ARCHIVE_ENCRYPT": ("archive", "encrypt"),
         "DCS_REPORT_DIR": ("report", "directory"),
     }
     for env_var, (section, key) in env_map.items():
@@ -879,7 +943,17 @@ def load_config(
             except ValueError:
                 log.warning("ignoring non numeric %s=%r", env_var, raw)
         else:
-            setattr(section_obj, key, raw)
+            # Go through the same coercion the file loader uses: a boolean
+            # setting given as "false" must be False, not the truthy string
+            # "false" (which is what a bare setattr would store).
+            current = getattr(section_obj, key)
+            coerced = _coerce(type(current), raw)
+            if coerced is UNCONVERTIBLE:
+                log.warning(
+                    "ignoring %s=%r: a %s was expected", env_var, raw, type(current).__name__
+                )
+                continue
+            setattr(section_obj, key, coerced)
 
     return config
 

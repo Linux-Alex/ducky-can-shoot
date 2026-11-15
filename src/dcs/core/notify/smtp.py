@@ -65,7 +65,11 @@ class Notifier:
         icon = branding.icon_png()
         if icon:
             parts = message.get_payload()
-            if isinstance(parts, list) and len(parts) > 1:
+            if (
+                isinstance(parts, list)
+                and len(parts) > 1
+                and isinstance(parts[1], EmailMessage)
+            ):
                 parts[1].add_related(
                     icon,
                     maintype="image",

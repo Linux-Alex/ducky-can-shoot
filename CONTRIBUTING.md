@@ -51,7 +51,14 @@ PYTHONPATH=src python3 -m pytest                       # everything
 PYTHONPATH=src python3 -m pytest tests/test_pipeline.py
 PYTHONPATH=src python3 -m pytest -k heuristic -x
 PYTHONPATH=src python3 -m pytest --cov=dcs             # needs pytest-cov
+PYTHONPATH=src python3 -m pytest -m integration        # needs a real ClamAV
 ```
+
+The `integration` marker is the exception to "hermetic": it runs a real
+`clamscan` against the EICAR pattern (`tests/test_integration_clamav.py`) and is
+skipped by default when no real scanner is installed. CI runs it from the
+scheduled `.github/workflows/clamav.yml`, which sets `DCS_CLAMAV_INTEGRATION=1`
+so that a broken installation fails the workflow instead of looking green.
 
 `PYTHONPATH=src` is required: the core is not installed into the environment when
 you run from a checkout, and the tests import `dcs.*` directly. Test configuration
@@ -71,8 +78,9 @@ fixtures:
 | `tmp_config` | An `AppConfig` whose output, report and outbox paths all live inside `tmp_path`. |
 | `qapp` | An offscreen `QApplication`, skipped cleanly when PyQt6 is missing. |
 
-The environment is scrubbed of `DCS_*` variables and the XDG directories are
-redirected into a temporary directory, so a developer's own configuration can
+The environment is scrubbed of `DCS_*` variables and every XDG directory - config,
+data, cache, **state** and runtime - is redirected into a temporary directory, so
+a developer's own configuration (or the watcher's log in `~/.local/state`) can
 never influence a test run.
 
 - `tests/fakes/clamscan` and `tests/fakes/clamdscan` are Python stand-ins for the
@@ -305,8 +313,10 @@ Security issues do not go in the tracker. Follow `SECURITY.md`.
   refactor are four pull requests, not one.
 - **Write a commit message that explains why.** The diff shows what changed; the
   message says what problem it solves. Reference the issue if there is one.
-- **Run the suite.** `PYTHONPATH=src python3 -m pytest` must pass, and `ruff check .`
-  must be clean. Mention anything you could not test and how you verified it.
+- **Run the suite.** `PYTHONPATH=src python3 -m pytest` must pass, `ruff check .`
+  must be clean and `mypy` must report no issues. The same three checks run in CI
+  (plus coverage, a package smoke test and the scheduled ClamAV job). Mention
+  anything you could not test and how you verified it.
 - **Touch only what you need.** Unrelated reformatting makes a security change
   unreviewable. Do not rename public structures (stages, event names, JSON keys,
   provider ids) without a discussion first: they are contracts, as listed at the

@@ -1,12 +1,13 @@
 """Qt models behind the QML views.
 
-Five models cover the whole UI:
+Six models cover the whole UI:
 
 DevicesModel     - plugged in removable media, refreshed by polling lsblk
 StagesModel      - the seven pipeline stages with live progress
 FindingsModel    - findings as they stream out of the scan
 LogModel         - the tail of the application log
 ThroughputModel  - recent rate samples for the little throughput chart
+HistoryModel     - finished jobs from the local index (dcs.core.history)
 
 Every model is written so that updates always happen on the GUI thread: the
 worker emits Qt signals that are queued into these slots.
@@ -16,7 +17,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QAbstractListModel, QModelIndex, Qt, pyqtProperty, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import (  # type: ignore[attr-defined]  # PyQt6 stubs omit pyqtProperty
+    QAbstractListModel,
+    QModelIndex,
+    Qt,
+    pyqtProperty,
+    pyqtSignal,
+    pyqtSlot,
+)
 
 from dcs.core.device import BlockDevice
 from dcs.core.events import (
@@ -388,13 +396,129 @@ class TextLinesModel(QAbstractListModel):
         self.endResetModel()
         self.countChanged.emit()
 
-    @pyqtSlot(result=str)
+    @pyqtSlot(result=str)  # type: ignore[arg-type]  # the stubs type "result" as a name string
     def as_text(self) -> str:
         return "\n".join(self._rows)
 
     @pyqtProperty(str, notify=countChanged)
     def text(self) -> str:
         return "\n".join(self._rows)
+
+
+class HistoryModel(QAbstractListModel):
+    """Finished jobs from the local index, newest first.
+
+    The model holds what the list view shows; the report itself is opened from
+    disk, so a history with hundreds of jobs never copies a single report body
+    into memory (or into the database).
+    """
+
+    JobIdRole = Qt.ItemDataRole.UserRole + 1
+    StartedRole = Qt.ItemDataRole.UserRole + 2
+    LabelRole = Qt.ItemDataRole.UserRole + 3
+    VerdictRole = Qt.ItemDataRole.UserRole + 4
+    SourceRole = Qt.ItemDataRole.UserRole + 5
+    FilesRole = Qt.ItemDataRole.UserRole + 6
+    FindingsRole = Qt.ItemDataRole.UserRole + 7
+    ThreatsRole = Qt.ItemDataRole.UserRole + 8
+    ArchiveTextRole = Qt.ItemDataRole.UserRole + 9
+    EncryptedRole = Qt.ItemDataRole.UserRole + 10
+    ShareLinkRole = Qt.ItemDataRole.UserRole + 11
+    ReportRole = Qt.ItemDataRole.UserRole + 12
+    DurationRole = Qt.ItemDataRole.UserRole + 13
+    HostRole = Qt.ItemDataRole.UserRole + 14
+    DataRole = Qt.ItemDataRole.UserRole + 15
+
+    countChanged = pyqtSignal()
+
+    def __init__(self, parent: Any = None) -> None:
+        super().__init__(parent)
+        self._rows: list[dict[str, Any]] = []
+
+    def roleNames(self) -> dict[int, bytes]:
+        return {
+            self.JobIdRole: b"jobId",
+            self.StartedRole: b"startedText",
+            self.LabelRole: b"label",
+            self.VerdictRole: b"verdict",
+            self.SourceRole: b"sourcePath",
+            self.FilesRole: b"filesText",
+            self.FindingsRole: b"findingsText",
+            self.ThreatsRole: b"threatsText",
+            self.ArchiveTextRole: b"archiveText",
+            self.EncryptedRole: b"encrypted",
+            self.ShareLinkRole: b"shareLink",
+            self.ReportRole: b"reportHtml",
+            self.DurationRole: b"durationText",
+            self.HostRole: b"uploadProvider",
+            self.DataRole: b"raw",
+        }
+
+    def rowCount(self, parent: QModelIndex | None = None) -> int:
+        return len(self._rows)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        if not index.isValid() or not (0 <= index.row() < len(self._rows)):
+            return None
+        row = self._rows[index.row()]
+        mapping = {
+            self.JobIdRole: row["jobId"],
+            self.StartedRole: row["startedText"],
+            self.LabelRole: row["label"],
+            self.VerdictRole: row["verdict"],
+            self.SourceRole: row["sourcePath"],
+            self.FilesRole: row["filesText"],
+            self.FindingsRole: row["findingsText"],
+            self.ThreatsRole: row["threatsText"],
+            self.ArchiveTextRole: row["archiveText"],
+            self.EncryptedRole: row["encrypted"],
+            self.ShareLinkRole: row["shareLink"],
+            self.ReportRole: row["reportHtml"],
+            self.DurationRole: row["durationText"],
+            self.HostRole: row["uploadProvider"],
+            self.DataRole: row["raw"],
+        }
+        return mapping.get(role)
+
+    @pyqtProperty(int, notify=countChanged)
+    def count(self) -> int:
+        return len(self._rows)
+
+    @pyqtSlot(object)
+    def replace(self, entries: Any) -> None:
+        """Swap the whole list; *entries* is a list of HistoryEntry dicts."""
+        rows: list[dict[str, Any]] = []
+        for entry in entries or []:
+            data = entry if isinstance(entry, dict) else entry.to_dict()
+            started = str(data.get("startedAt") or "").replace("T", " ")
+            rows.append(
+                {
+                    "jobId": str(data.get("jobId") or ""),
+                    "startedText": started[:19] or "-",
+                    "label": str(data.get("label") or ""),
+                    "verdict": str(data.get("verdict") or ""),
+                    "sourcePath": str(data.get("sourcePath") or ""),
+                    "filesText": f"{int(data.get('filesScanned') or 0):,}",
+                    "findingsText": f"{int(data.get('findingCount') or 0):,}",
+                    "threatsText": f"{int(data.get('threatCount') or 0):,}",
+                    "archiveText": str(data.get("archiveBytesText") or "-"),
+                    "encrypted": bool(data.get("archiveEncrypted")),
+                    "shareLink": str(data.get("shareLink") or ""),
+                    "reportHtml": str((data.get("reports") or {}).get("html") or ""),
+                    "durationText": str(data.get("durationText") or "-"),
+                    "uploadProvider": str(data.get("uploadProvider") or ""),
+                    "raw": data,
+                }
+            )
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+        self.countChanged.emit()
+
+    def jobIdAt(self, row: int) -> str:
+        if 0 <= row < len(self._rows):
+            return self._rows[row]["jobId"]
+        return ""
 
 
 class LogModel(QAbstractListModel):
@@ -459,7 +583,7 @@ class LogModel(QAbstractListModel):
         self._rows = []
         self.endResetModel()
 
-    @pyqtSlot(result=str)
+    @pyqtSlot(result=str)  # type: ignore[arg-type]  # the stubs type "result" as a name string
     def as_text(self) -> str:
         return "\n".join(f"{row['time']} {row['level']:<7} {row['message']}" for row in self._rows)
 

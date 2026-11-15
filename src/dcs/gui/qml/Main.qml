@@ -117,6 +117,10 @@ Kirigami.ApplicationWindow {
                     Kirigami.Action {
                         text: "About"
                         icon.name: "help-about"
+                    },
+                    Kirigami.Action {
+                        text: "History"
+                        icon.name: "document-open-recent"
                     }
                 ]
             }
@@ -151,6 +155,7 @@ Kirigami.ApplicationWindow {
                     onInstallRequested: clamavDialog.open()
                 }
                 AboutView {}
+                HistoryView {}
             }
 
             // The status bar is the last row of this column rather than the

@@ -35,6 +35,10 @@ Item {
     property int splitSizeMb: 0
     property int sizeWarnGb: 20
     property string archiveWhen: "clean"
+    property bool archiveEncrypt: false
+    property bool archiveEncryptHeaders: true
+    property string passphraseEnv: "DCS_ARCHIVE_PASSPHRASE"
+    property string passphraseCommand: ""
 
     property bool uploadEnabled: true
     property string provider: "gofile"
@@ -64,6 +68,10 @@ Item {
     property string watchMode: "off"
     property bool watchAutostart: false
     property bool updateCheckOnStart: true
+
+    property bool historyEnabled: true
+    property int historyMaxJobs: 500
+    property int historyMaxAgeDays: 365
 
     //! true while "Test SMTP" is waiting for the server
     property bool smtpTesting: false
@@ -108,6 +116,10 @@ Item {
         splitSizeMb = s.archive.split_size_mb;
         sizeWarnGb = s.archive.size_warn_gb;
         archiveWhen = s.archive.when;
+        archiveEncrypt = s.archive.encrypt;
+        archiveEncryptHeaders = s.archive.encrypt_headers;
+        passphraseEnv = s.archive.passphrase_env;
+        passphraseCommand = s.archive.passphrase_command;
 
         uploadEnabled = s.upload.enabled;
         provider = s.upload.provider;
@@ -137,6 +149,10 @@ Item {
         watchMode = s.watch.mode;
         watchAutostart = s.watch.autostart;
         updateCheckOnStart = s.updates.check_on_start;
+
+        historyEnabled = s.history.enabled;
+        historyMaxJobs = s.history.max_jobs;
+        historyMaxAgeDays = s.history.max_age_days;
 
         // what is on screen now is what the file says: nothing to save
         savedDraft = JSON.stringify(draftPayload());
@@ -168,7 +184,11 @@ Item {
                 "compression_level": compressionLevel,
                 "split_size_mb": splitSizeMb,
                 "size_warn_gb": sizeWarnGb,
-                "when": archiveWhen
+                "when": archiveWhen,
+                "encrypt": archiveEncrypt,
+                "encrypt_headers": archiveEncryptHeaders,
+                "passphrase_env": passphraseEnv,
+                "passphrase_command": passphraseCommand
             },
             "upload": {
                 "enabled": uploadEnabled,
@@ -202,6 +222,11 @@ Item {
         };
         payload.updates = {
             "check_on_start": updateCheckOnStart
+        };
+        payload.history = {
+            "enabled": historyEnabled,
+            "max_jobs": historyMaxJobs,
+            "max_age_days": historyMaxAgeDays
         };
         if (smtpPassword !== "") {
             payload.email.password = smtpPassword;
@@ -471,6 +496,36 @@ Item {
                                 onActivated: view.archiveWhen = model[currentIndex]
                             }
 
+                            Controls.CheckBox {
+                                Kirigami.FormData.label: "Encryption:"
+                                text: "Encrypt the image (7z, AES-256)"
+                                checked: view.archiveEncrypt
+                                onToggled: view.archiveEncrypt = checked
+                            }
+
+                            Controls.CheckBox {
+                                text: "Encrypt the file names too (recommended)"
+                                checked: view.archiveEncryptHeaders
+                                enabled: view.archiveEncrypt
+                                onToggled: view.archiveEncryptHeaders = checked
+                            }
+
+                            Controls.TextField {
+                                Kirigami.FormData.label: "Passphrase variable:"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 18
+                                placeholderText: "DCS_ARCHIVE_PASSPHRASE"
+                                text: view.passphraseEnv
+                                onTextEdited: view.passphraseEnv = text
+                            }
+
+                            Controls.TextField {
+                                Kirigami.FormData.label: "Passphrase command:"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 22
+                                placeholderText: "e.g. pass show archive/dcs (optional)"
+                                text: view.passphraseCommand
+                                onTextEdited: view.passphraseCommand = text
+                            }
+
                             Controls.Slider {
                                 Kirigami.FormData.label: "Compression level:"
                                 Layout.preferredWidth: Kirigami.Units.gridUnit * 14
@@ -584,6 +639,78 @@ Item {
                             text: {
                                 const entry = backend.providers.find(p => p.id === view.provider);
                                 return entry ? entry.notes : "";
+                            }
+                        }
+                    }
+                }
+
+                // ------------------------------------------------------------ history
+                Kirigami.Card {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.gridUnit
+                    Layout.rightMargin: Kirigami.Units.gridUnit
+                    padding: Kirigami.Units.largeSpacing
+
+                    contentItem: ColumnLayout {
+                        Kirigami.Heading {
+                            level: 3
+                            text: "History"
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                            text: "Finished jobs are indexed locally so they can be searched and "
+                                  + "reopened from the History tab. The index names the files of a "
+                                  + "medium, so it never leaves this machine. The limit below is "
+                                  + "applied after every job."
+                        }
+
+                        Kirigami.FormLayout {
+                            Layout.fillWidth: true
+
+                            Controls.CheckBox {
+                                Kirigami.FormData.label: "Enabled:"
+                                text: "Remember finished jobs"
+                                checked: view.historyEnabled
+                                onToggled: view.historyEnabled = checked
+                            }
+
+                            Controls.SpinBox {
+                                Kirigami.FormData.label: "Keep at most (jobs, 0 = no limit):"
+                                from: 0
+                                to: 100000
+                                stepSize: 50
+                                value: view.historyMaxJobs
+                                onValueModified: view.historyMaxJobs = value
+                            }
+
+                            Controls.SpinBox {
+                                Kirigami.FormData.label: "Drop jobs older than (days, 0 = never):"
+                                from: 0
+                                to: 3650
+                                stepSize: 30
+                                value: view.historyMaxAgeDays
+                                onValueModified: view.historyMaxAgeDays = value
+                            }
+
+                            RowLayout {
+                                Kirigami.FormData.label: "Stored:"
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Controls.Label {
+                                    text: backend.historyCount + " job(s)"
+                                }
+
+                                Controls.Button {
+                                    objectName: "clearHistoryButton"
+                                    text: "Clear History…"
+                                    icon.name: "edit-clear-history"
+                                    enabled: backend.historyCount > 0
+                                    onClicked: clearHistoryDialog.open()
+                                }
                             }
                         }
                     }
@@ -1132,5 +1259,27 @@ Item {
                 }
             }
         }
+    }
+
+    Kirigami.PromptDialog {
+        id: clearHistoryDialog
+        title: "Clear the whole job history?"
+        subtitle: "This deletes all " + backend.historyCount + " index entries. The report files "
+                  + "stay on disk; only the index goes away. It cannot be undone."
+        customFooterActions: [
+            Kirigami.Action {
+                text: "Cancel"
+                icon.name: "dialog-cancel"
+                onTriggered: clearHistoryDialog.close()
+            },
+            Kirigami.Action {
+                text: "Clear the History"
+                icon.name: "edit-clear-history"
+                onTriggered: {
+                    backend.clearHistory();
+                    clearHistoryDialog.close();
+                }
+            }
+        ]
     }
 }

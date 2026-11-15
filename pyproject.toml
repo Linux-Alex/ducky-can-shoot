@@ -58,6 +58,27 @@ include = ["src", "tests", "docs", "scripts", "README.md", "LICENSE", "pyproject
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["error::DeprecationWarning:dcs.*"]
+markers = [
+  "integration: needs a real external program (a real clamscan, not tests/fakes); skipped by default and run by the scheduled clamav.yml workflow",
+]
+
+[tool.coverage.run]
+# the GUI package is measured too; the QML files themselves are exercised by
+# the interface tests, which need a Qt platform plugin
+source = ["dcs"]
+branch = true
+
+[tool.coverage.report]
+# a floor, not a target: it exists so that a change that stops exercising a
+# whole module is visible in the review, not to make people chase a number
+fail_under = 75
+show_missing = true
+skip_covered = true
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 100
@@ -74,4 +95,15 @@ ignore = ["E501", "N802", "N803", "N806", "N815", "N816", "UP042"]
 [tool.mypy]
 python_version = "3.11"
 packages = ["dcs"]
+mypy_path = "src"
 ignore_missing_imports = true
+# PyQt6 ships no type information and the QML-facing properties are typed by
+# the C++ side; the rest of the tree is checked normally.
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+# QAbstractListModel.roleNames() is typed as dict[int, QByteArray] by the PyQt6
+# stubs, while returning plain bytes is what QML accepts and what every model
+# in this package does.  Only that override is relaxed, for this module only.
+module = ["dcs.gui.models"]
+disable_error_code = ["override"]

@@ -8,7 +8,75 @@ change between minor releases; each such change is listed below.
 
 ## [Unreleased]
 
-Nothing yet.
+The 0.3 milestone from [the roadmap](docs/ROADMAP.md): a private, reviewable
+workflow. It collects the two features the roadmap sequences as 0.3.0 (encrypted
+uploads) and 0.3.1 (job history), plus the release-quality work that preceded
+them.
+
+### Added
+
+- **Encrypted archives, and therefore encrypted uploads.** `archive.encrypt`
+  (or `dcs run --encrypt`, or the **Encrypt the image** checkbox) produces a
+  7z image with AES-256 encryption and, by default, encrypted file names, so a
+  link to an anonymous host is useless without the passphrase. The passphrase
+  comes from the environment variable named by `archive.passphrase_env`
+  (`DCS_ARCHIVE_PASSPHRASE` by default), from `archive.passphrase_command`, from
+  the interface's password field, or from an interactive prompt; it is never
+  written to the configuration, the report, the JSON result or the log, and the
+  configuration file holds only the *name* of the source. The archive stage
+  **fails closed**: a job that asked for encryption and has no passphrase
+  produces no image at all, and a produced image is probed after creation (a
+  listing without the password must fail) before anything can reach a host.
+  Reports, the email and the result JSON say that the archive is encrypted and
+  that the passphrase is not among them. `dcs doctor` reports the current
+  upload privacy and recommends turning encryption on.
+
+- **A local job history.** Every finished job is indexed in
+  `~/.local/share/dcs/history.db` (SQLite, mode 0600, schema version 1):
+  date, label, verdict, counts, archive path and SHA-256, the encryption flag,
+  the share link, the *paths* of the reports, and one row per finding (path,
+  SHA-256, size, severity) so the label, verdict, file name and hash are all
+  searchable. Nothing in it is uploaded or looked up online, and report bodies
+  are never copied into it. `dcs history list|show|open|delete|clear|prune|path`
+  (JSON output included) and a **History** page in the interface cover the
+  workflow; `history.max_jobs` and `history.max_age_days` bound the index and
+  are applied after every job, with **Clear history** behind an explicit
+  confirmation. `dcs run --no-history` skips recording for one run.
+
+- A **benchmark harness** (`scripts/bench.py`) with a reproducible corpus, and
+  `docs/benchmarks.md` with the commands, the machine template and the gates
+  the roadmap requires before any code moves to Rust or C++.
+
+### Changed
+
+- **`docs/ROADMAP.md` now describes the project that exists.** It documents
+  what 0.2.4 provides (including YARA, the AppImage and the Dolphin actions,
+  which it used to list as missing), the honest list of limitations, the 0.3
+  milestone, and a separate "later ideas, not committed" section instead of
+  inventing a 0.2 plan for a 0.2.4 tree.
+
+### Tests and CI
+
+- `mypy` is now configured so that it can actually run (`mypy_path`, one
+  documented override for the PyQt6 stubs) and **CI runs it**; the tree is
+  clean.
+- Coverage is measured on the full Qt run with a documented floor
+  (`fail_under = 75`).
+- A **package-install smoke test** runs in regular CI: wheel and sdist are
+  built, the wheel is installed into a bare virtual environment, and the
+  installed copy is asked for its version, its providers, its configuration and
+  its QML/data files.
+- A **real end-to-end test** goes synthetic medium → scan → encrypted archive →
+  stand-in upload → reports → dry-run email → history row, plus a CLI variant
+  that checks the exit code and the index.
+- A **scheduled ClamAV workflow** runs the new `-m integration` test against a
+  real scanner and a real signature database every week; a missing ClamAV fails
+  that workflow instead of skipping it.
+- The tests now isolate `XDG_STATE_HOME` (the watcher service log used to land
+  in the developer's `~/.local/state`) and skip, instead of failing, when the
+  environment forbids the localhost socket the streaming tests need.
+- The configuration schema test pins the new `[archive]` keys and the new
+  `[history]` section.
 
 ## [0.2.4] - 2026-10-18
 

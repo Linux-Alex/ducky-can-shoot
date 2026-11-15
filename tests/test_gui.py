@@ -47,6 +47,7 @@ from dcs.gui.backend import IDLE, Backend  # noqa: E402
 from dcs.gui.models import (  # noqa: E402
     DevicesModel,
     FindingsModel,
+    HistoryModel,
     LogModel,
     StagesModel,
     ThroughputModel,
@@ -1201,10 +1202,12 @@ def test_a_backgrounded_window_sends_a_system_notification(
 def test_the_navigation_is_the_control_the_hig_asks_for(
     backend: Backend, qapp: Any, qt_messages: list[str]
 ) -> None:
-    """Five destinations that are not a linear flow: Kirigami.NavigationTabBar.
+    """Six destinations that are not a linear flow: Kirigami.NavigationTabBar.
 
-    The HIG is explicit ("with five or fewer destinations, use a
-    Kirigami.NavigationTabBar"), and it is also the control for immutable tabs.
+    The HIG asks for this control "with five or fewer destinations"; the sixth
+    (History) is a first class destination next to the result it repeats, and
+    keeping it in the same control is better than a second navigation
+    mechanism for one page.  The bar itself is what the test pins.
     """
     from PyQt6.QtCore import QObject
 
@@ -1218,9 +1221,9 @@ def test_the_navigation_is_the_control_the_hig_asks_for(
         None,
     )
     assert bar is not None, "the navigation is not a Kirigami.NavigationTabBar"
-    assert bar.property("count") == 5
+    assert bar.property("count") == 6
 
-    for index in range(5):
+    for index in range(6):
         window.setProperty("tabIndex", index)
         for _ in range(3):
             qapp.processEvents()
@@ -1580,4 +1583,182 @@ def test_the_interface_checks_for_updates_when_it_starts() -> None:
     assert "backend.checkForUpdates" in source
 
 
+
+
+
+
+# ---------------------------------------------------------------------------
+# the history page and the encryption option (0.3)
+# ---------------------------------------------------------------------------
+
+
+def test_history_model_maps_one_job() -> None:
+    """The list view gets flat, display ready values, not a JobResult."""
+    model = HistoryModel()
+    model.replace(
+        [
+            {
+                "jobId": "abc123",
+                "startedAt": "2026-02-03T04:05:06+00:00",
+                "label": "HOLIDAY",
+                "sourcePath": "/media/HOLIDAY",
+                "verdict": "clean",
+                "filesScanned": 42,
+                "findingCount": 1,
+                "threatCount": 0,
+                "archiveBytesText": "1.2 GiB",
+                "archiveEncrypted": True,
+                "shareLink": "https://example.test/f/1",
+                "uploadProvider": "gofile",
+                "durationText": "00:12",
+                "reports": {"html": "/reports/DCS_HOLIDAY.html"},
+            }
+        ]
+    )
+
+    assert model.count == 1
+    assert walk(model, model.JobIdRole, 0) == "abc123"
+    assert walk(model, model.LabelRole, 0) == "HOLIDAY"
+    assert walk(model, model.StartedRole, 0) == "2026-02-03 04:05:06"
+    assert walk(model, model.FilesRole, 0) == "42"
+    assert walk(model, model.EncryptedRole, 0) is True
+    assert walk(model, model.ReportRole, 0) == "/reports/DCS_HOLIDAY.html"
+
+    model.replace([])
+    assert model.count == 0
+
+
+def test_backend_refreshes_searches_and_deletes_history(
+    backend: Backend, qapp: Any
+) -> None:
+    from dcs.core.events import Verdict
+    from dcs.core.history import open_history
+    from dcs.core.result import JobResult
+
+    store = open_history(backend.config)
+    store.record(
+        JobResult(
+            job_id="gui-blue",
+            source_label="BLUE",
+            started_at="2026-01-01T10:00:00+00:00",
+            verdict=Verdict.CLEAN,
+        )
+    )
+    store.record(
+        JobResult(
+            job_id="gui-green",
+            source_label="GREEN",
+            started_at="2026-01-02T10:00:00+00:00",
+            verdict=Verdict.INFECTED,
+        )
+    )
+
+    backend.refreshHistory("")
+    assert backend.historyCount == 2
+    assert backend.historyError == ""
+    assert walk(backend.history, backend.history.LabelRole, 0) == "GREEN"
+
+    backend.refreshHistory("blue")
+    assert backend.history.count == 1
+    assert walk(backend.history, backend.history.JobIdRole, 0) == "gui-blue"
+
+    backend.deleteHistoryJob("gui-blue")
+    backend.refreshHistory("")
+    assert backend.historyCount == 1
+
+
+def test_backend_reports_a_broken_history_instead_of_crashing(
+    tmp_config: AppConfig, qapp: Any
+) -> None:
+    """A database path under a regular file is unusable: say so, do not raise."""
+    blocker = Path(tmp_config.source_path).parent / "not-a-directory"
+    blocker.write_text("x", encoding="utf-8")
+    tmp_config.history.database = str(blocker / "history.db")
+
+    instance = Backend(tmp_config, poll_devices=False)
+    try:
+        # an empty refresh does not open the database (there may be nothing to
+        # read yet); a search does, and that is where the failure shows up
+        instance.refreshHistory("anything")
+        assert instance.historyCount == 0
+        assert "cannot open the job history" in instance.historyError
+        assert instance.history.count == 0
+    finally:
+        log_ring().remove_listener(instance._on_log_record)
+
+
+def test_encryption_source_names_the_configured_secret(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DCS_ARCHIVE_PASSPHRASE", raising=False)
+    backend.config.archive.passphrase_command = ""
+    assert backend.encryptionSource == ""
+
+    monkeypatch.setenv("DCS_ARCHIVE_PASSPHRASE", "not-a-real-secret")
+    assert "DCS_ARCHIVE_PASSPHRASE" in backend.encryptionSource
+
+    monkeypatch.delenv("DCS_ARCHIVE_PASSPHRASE", raising=False)
+    backend.config.archive.passphrase_command = "pass show archive/dcs"
+    assert "helper command" in backend.encryptionSource
+
+
+def test_the_new_job_page_offers_encryption_and_a_passphrase_field(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    from PyQt6.QtCore import QObject
+
+    engine, _ = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.show()
+    for _ in range(40):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    check = window.findChild(QObject, "encryptCheck")
+    field = window.findChild(QObject, "passphraseField")
+    assert check is not None, "the New job page has no encryption option"
+    assert field is not None, "the New job page has no passphrase field"
+    assert field.property("text") == ""
+    assert check.property("checked") is False  # off until asked for
+    # the passphrase must never be shown in clear (QML enums do not convert to
+    # Python values, so the declaration is what gets checked)
+    home = (ROOT_QML / "views" / "HomeView.qml").read_text(encoding="utf-8")
+    assert "echoMode: TextInput.Password" in home
+
+    gui_app.teardown_engine(engine)
+
+
+def test_the_history_tab_lists_the_indexed_jobs(
+    backend: Backend, qapp: Any, qt_messages: list[str]
+) -> None:
+    from PyQt6.QtCore import QObject
+
+    from dcs.core.events import Verdict
+    from dcs.core.history import open_history
+    from dcs.core.result import JobResult
+
+    open_history(backend.config).record(
+        JobResult(
+            job_id="tab-job",
+            source_label="TABSTICK",
+            started_at="2026-01-01T10:00:00+00:00",
+            verdict=Verdict.CLEAN,
+        )
+    )
+    backend.refreshHistory("")
+
+    engine, _ = gui_app.build_engine(backend.config, backend=backend)
+    window = engine.rootObjects()[0]
+    window.show()
+    window.setProperty("tabIndex", 5)  # the History page
+    for _ in range(40):
+        qapp.processEvents()
+        time.sleep(0.01)
+
+    search = window.findChild(QObject, "historySearch")
+    assert search is not None, "the History page was not built"
+    assert backend.history.count == 1
+    assert walk(backend.history, backend.history.JobIdRole, 0) == "tab-job"
+
+    gui_app.teardown_engine(engine)
 

@@ -192,8 +192,22 @@ Controls.ScrollView {
                     font: Kirigami.Theme.smallFont
                     opacity: 0.65
                     wrapMode: Text.WordWrap
-                    text: "Anyone with this link can download the archive. The host deletes it after its "
-                          + "retention period."
+                    text: (view.summary && view.summary.archive && view.summary.archive.encrypted)
+                        ? "The archive is encrypted (AES-256): the link alone does not open it. "
+                          + "The passphrase is not in the report or the email - it has to reach the "
+                          + "recipient through another channel."
+                        : "Anyone with this link can download the archive. The host deletes it after "
+                          + "its retention period."
+                }
+
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: !!(view.summary && view.summary.archive && view.summary.archive.encrypted)
+                    type: Kirigami.MessageType.Positive
+                    text: "Encrypted archive (AES-256"
+                          + (view.summary && view.summary.archive && view.summary.archive.headersEncrypted
+                             ? ", file names included" : "")
+                          + "). The passphrase was never written to the report, the email or the log."
                 }
 
                 Kirigami.InlineMessage {

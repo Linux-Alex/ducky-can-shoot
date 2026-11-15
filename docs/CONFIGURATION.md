@@ -167,6 +167,18 @@ watcher first, so the watcher is started again from the new code.
 | `when` | string | `"clean"` | When to build the image: `clean` (only when the scan found nothing), `always` (even for an infected medium) or `never`. `clean` is the safety default. |
 | `use_device_label` | bool | `true` | Use the medium's label in the archive file name (`DCS_<label>_<timestamp>.zip`). When false the name uses `usb`. |
 | `min_free_space_ratio` | float | `1.1` | Refuse to archive unless the target filesystem has at least this multiple of the source size free. The archive is never allowed to be written into a full filesystem. |
+| `encrypt` | bool | `false` | Encrypt the image with 7z AES-256 before it can leave the machine. Encryption switches the format to `7z` (and the extension with it) even when `format` says `zip`, needs the `7z` binary, and **fails closed**: without a passphrase the archive stage fails instead of producing a readable image. `DCS_ARCHIVE_ENCRYPT` overrides it, and `dcs run --encrypt` / `--no-encrypt` override it for one run. |
+| `encrypt_headers` | bool | `true` | Encrypt the file names as well (`-mhe=on`). Without a passphrase such an archive cannot even be listed, which is what protects names like `invoice-from-bank.pdf`. Turning it off keeps the listing readable. |
+| `passphrase_env` | string | `"DCS_ARCHIVE_PASSPHRASE"` | Name of the environment variable that holds the archive passphrase. Only the *name* is stored here; the secret never is. |
+| `passphrase_command` | string | `""` | Helper command that prints the passphrase, for example `"pass show archive/dcs"`. Runs with the usual 15 second timeout. Used when the environment variable is empty, and before asking a terminal. |
+
+**Encryption and the verdict.** Encryption is a privacy measure, never a
+permission slip: `upload.upload_when = "clean"` still refuses any suspicious or
+infected image, and the confirmation for a non-clean upload is unchanged.
+A passphrase travels through the environment variable above, the helper
+command, the interface's password field or an interactive prompt - never through
+the configuration file, the report, the JSON result or the log. Give it to the
+recipient through a different channel than the link.
 
 ### `[upload]`
 
@@ -230,6 +242,20 @@ limits aggressively while the storage hosts keep answering
 | `timeout_s` | int | `60` | Socket timeout for the SMTP conversation, in seconds. |
 | `insecure_tls` | bool | `false` | Skip TLS certificate verification. Only for a trusted internal relay with a self-signed certificate; it removes the protection against a man in the middle on that hop. |
 | `dry_run_dir` | string | `""` | Where `--dry-run-email` writes the `.eml` file. Empty means `~/.local/share/dcs/outbox`. |
+
+### `[history]`
+
+Every finished job is recorded in a small SQLite index under the data
+directory. It stores the labels, verdicts, counts, report **paths** and the paths
+and SHA-256 of the findings - never a copy of a report, and never anything
+derived from a passphrase. Nothing in it is uploaded or looked up online.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Record finished jobs at all. `dcs run --no-history` disables it for one run. |
+| `database` | string | `""` | Where the index lives. Empty means `~/.local/share/dcs/history.db`. The file is created with mode 0600. |
+| `max_jobs` | int | `500` | Keep at most this many jobs, oldest first; `0` means no count limit. Applied after every job, and by `dcs history prune`. |
+| `max_age_days` | int | `365` | Drop jobs older than this; `0` means no age limit. |
 
 ### `[report]`
 
@@ -366,6 +392,10 @@ size_warn_gb = 20
 when = "clean"
 use_device_label = true
 min_free_space_ratio = 1.1
+encrypt = false
+encrypt_headers = true
+passphrase_env = "DCS_ARCHIVE_PASSPHRASE"
+passphrase_command = ""
 
 [upload]
 enabled = true

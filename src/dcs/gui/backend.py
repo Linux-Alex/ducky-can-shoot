@@ -17,7 +17,7 @@ import threading
 from dataclasses import fields, replace
 from typing import Any
 
-from PyQt6.QtCore import (
+from PyQt6.QtCore import (  # type: ignore[attr-defined]  # PyQt6 stubs omit pyqtProperty
     QCoreApplication,
     QObject,
     Qt,
@@ -46,6 +46,7 @@ from dcs.core.device import (
     unmount_device,
 )
 from dcs.core.events import STAGE_ORDER
+from dcs.core.history import HistoryError, open_history
 from dcs.core.installer import Installer, build_freshclam_plan, build_plan, manual_instructions
 from dcs.core.installer import verify as verify_clamav
 from dcs.core.log import get_logger, log_ring
@@ -58,6 +59,7 @@ from dcs.core.watch import MODE_DESCRIPTIONS, MODE_LABELS
 from dcs.gui.models import (
     DevicesModel,
     FindingsModel,
+    HistoryModel,
     LogModel,
     StagesModel,
     TextLinesModel,
@@ -113,6 +115,7 @@ class Backend(QObject):
     pendingDeviceChanged = pyqtSignal()
     settingsSaved = pyqtSignal(bool, str)  # ok, message
     watchStateChanged = pyqtSignal()
+    historyChanged = pyqtSignal()
     installStateChanged = pyqtSignal()
     installFinished = pyqtSignal(object)
     #: the update check or its installation changed state (see updateState)
@@ -135,6 +138,7 @@ class Backend(QObject):
         self.devices_model = DevicesModel(self)
         self.stages_model = StagesModel(self)
         self.findings_model = FindingsModel(self)
+        self.history_model = HistoryModel(self)
         self.log_model = LogModel(self)
         self.throughput_model = ThroughputModel(self)
         self.install_model = TextLinesModel(self)
@@ -178,6 +182,11 @@ class Backend(QObject):
         #: the window wide toast (which is easy to miss on a long page)
         self._save_message = ""
         self._save_ok = True
+        #: what the history page shows about the index itself
+        self._history_count = 0
+        self._history_database = ""
+        self._history_error = ""
+        self._history_query = ""
 
         # Watches for media plugged in while the window is open.  The mode is
         # "off" by default; apply_config() only starts the timer when the user
@@ -189,6 +198,7 @@ class Backend(QObject):
         self.refreshDevices()
         self.refreshEngineStatus()
         self._watch_state = ""
+        self.refreshHistory("")
         if poll_devices:
             self._poll = QTimer(self)
             self._poll.setInterval(3000)
@@ -256,6 +266,37 @@ class Backend(QObject):
     @pyqtProperty("QVariantList", constant=True)
     def providers(self) -> list[dict[str, Any]]:
         return self._providers
+
+    @pyqtProperty(QObject, constant=True)
+    def history(self) -> HistoryModel:
+        return self.history_model
+
+    @pyqtProperty(int, notify=historyChanged)
+    def historyCount(self) -> int:
+        """How many jobs the local index holds."""
+        return self._history_count
+
+    @pyqtProperty(str, notify=historyChanged)
+    def historyDatabase(self) -> str:
+        return self._history_database
+
+    @pyqtProperty(str, notify=historyChanged)
+    def historyError(self) -> str:
+        return self._history_error
+
+    @pyqtProperty(str, notify=settingsChanged)
+    def encryptionSource(self) -> str:
+        """Where the archive passphrase would come from without asking.
+
+        Empty when a job would have to ask for it: the New job page uses this
+        to decide whether its password field may stay empty.
+        """
+        env_name = self.config.archive.passphrase_env or "DCS_ARCHIVE_PASSPHRASE"
+        if os.environ.get(env_name):
+            return f"the environment variable {env_name}"
+        if self.config.archive.passphrase_command:
+            return "the configured helper command"
+        return ""
 
     @pyqtProperty("QVariantMap", notify=settingsChanged)
     def settings(self) -> dict[str, Any]:
@@ -443,7 +484,7 @@ class Backend(QObject):
         self._source_label = os.path.basename(path.rstrip("/")) or path
         self.selectionChanged.emit()
 
-    @pyqtSlot(result=bool)
+    @pyqtSlot(result=bool)  # type: ignore[arg-type]  # the stubs type "result" as a name string
     def mountSelected(self) -> bool:
         device = self.devices_model.device_at(self._selected_row)
         if device is None:
@@ -463,7 +504,7 @@ class Backend(QObject):
             self.toast.emit("error", f"Could not mount {device.path}: {message}")
         return ok
 
-    @pyqtSlot(result=bool)
+    @pyqtSlot(result=bool)  # type: ignore[arg-type]  # the stubs type "result" as a name string
     def unmountSelected(self) -> bool:
         device = self.devices_model.device_at(self._selected_row)
         if device is None:
@@ -485,7 +526,7 @@ class Backend(QObject):
             self._engine_status = []
         self.settingsChanged.emit()
 
-    @pyqtSlot("QVariantMap", result=str)
+    @pyqtSlot("QVariantMap", result=str)  # type: ignore[arg-type]
     def validateDraft(self, values: dict[str, Any]) -> str:
         """What would be wrong if this draft were saved, as one message.
 
@@ -556,7 +597,7 @@ class Backend(QObject):
         self.refreshEngineStatus()
         self.settingsChanged.emit()
 
-    @pyqtSlot(result=str)
+    @pyqtSlot(result=str)  # type: ignore[arg-type]  # the stubs type "result" as a name string
     def validationProblems(self) -> str:
         return "\n".join(self.config.validation_problems())
 
@@ -612,7 +653,7 @@ class Backend(QObject):
     def watchLogPath(self) -> str:
         return str(service.log_path())
 
-    @pyqtSlot(result=bool)
+    @pyqtSlot(result=bool)  # type: ignore[arg-type]  # the stubs type "result" as a name string
     def startWatchService(self) -> bool:
         """Start the background watcher now, without waiting for a login."""
         started, message = service.start()
@@ -661,7 +702,7 @@ class Backend(QObject):
             self.watchStateChanged.emit()
         self.refreshDevices()
 
-    @pyqtSlot(str, result=bool)
+    @pyqtSlot(str, result=bool)  # type: ignore[arg-type]
     def openDevice(self, node: str, autorun: bool = False) -> bool:
         """Select a medium by node, mount it when needed, optionally run the job."""
         device = find_device(node)
@@ -748,7 +789,7 @@ class Backend(QObject):
         application = QGuiApplication.instance()
         if application is None:  # pragma: no cover - headless tests
             return False
-        return application.applicationState() == Qt.ApplicationState.ApplicationActive
+        return application.applicationState() == Qt.ApplicationState.ApplicationActive  # type: ignore[attr-defined]  # QGuiApplication in stubs is a bare QCoreApplication
 
     def _notify_desktop(self, payload: dict[str, Any]) -> None:
         """Show a notification with an Open button; the answer opens the window.
@@ -800,6 +841,7 @@ class Backend(QObject):
         if isinstance(recipients, str):
             recipients = [part.strip() for part in recipients.replace(";", ",").split(",") if part.strip()]
 
+        encrypt_option = options.get("encrypt")
         request = JobRequest(
             source_path=source,
             label=str(options.get("label") or self._source_label or os.path.basename(source)),
@@ -811,6 +853,9 @@ class Backend(QObject):
             recipients=list(recipients),
             email_dry_run=bool(options.get("dryRun", False)),
             assume_yes=bool(options.get("assumeYes", False)),
+            encrypt=None if encrypt_option is None else bool(encrypt_option),
+            # held in memory for this job only; the pipeline never stores it
+            passphrase=str(options.get("passphrase") or ""),
         )
 
         # remembered for the "safe to unplug" step at the end of the job
@@ -869,7 +914,7 @@ class Backend(QObject):
         if application is None:  # pragma: no cover - headless tests
             return
         with contextlib.suppress(AttributeError, TypeError):  # pragma: no cover - old Qt
-            application.setBadgeNumber(int(value))
+            application.setBadgeNumber(int(value))  # type: ignore[attr-defined]  # optional Qt API
 
     @pyqtSlot(object)
     def _on_progress(self, payload: Any) -> None:
@@ -912,6 +957,7 @@ class Backend(QObject):
         self._set_state(FINISHED)
         self.toast.emit("info", "Job finished")
         self.refreshDevices()
+        self.refreshHistory(self._history_query)
         self._maybe_unmount_after_job()
 
     def _maybe_unmount_after_job(self) -> None:
@@ -1003,6 +1049,78 @@ class Backend(QObject):
     def openUrl(self, url: str) -> None:
         if url and not QDesktopServices.openUrl(QUrl(url)):
             self.toast.emit("error", f"Could not open {url}")
+
+    # ------------------------------------------------------------------
+    # job history
+    #
+    # The index lives in dcs.core.history; this facade only lists it, opens
+    # the report it points at, and deletes rows.  It never copies a report
+    # body into the model, which is what keeps the history useful on a machine
+    # with hundreds of jobs.
+    # ------------------------------------------------------------------
+    @pyqtSlot(str)
+    def refreshHistory(self, query: str = "") -> None:
+        """Re-read the index, optionally filtered by a search string."""
+        store = open_history(self.config)
+        self._history_database = str(store.path)
+        self._history_query = query or ""
+        try:
+            if not store.path.exists() and not self._history_query:
+                self.history_model.replace([])
+                self._history_count = 0
+                self._history_error = ""
+            else:
+                entries = store.list_jobs(self._history_query, limit=500)
+                self.history_model.replace([entry.to_dict() for entry in entries])
+                self._history_count = store.count()
+                self._history_error = ""
+        except HistoryError as exc:
+            self.history_model.replace([])
+            self._history_count = 0
+            self._history_error = str(exc)
+        self.historyChanged.emit()
+
+    @pyqtSlot(str)
+    def openHistoryJob(self, job_id: str) -> None:
+        try:
+            entry = open_history(self.config).get(job_id)
+        except HistoryError as exc:
+            self.toast.emit("error", str(exc))
+            return
+        if entry is None:
+            self.toast.emit("error", f"Job {job_id} is not in the history any more")
+            self.refreshHistory(self._history_query)
+            return
+        report = entry.report_html or entry.report_text or entry.report_json
+        if not report:
+            self.toast.emit("error", "That job has no stored report to open")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(report)):
+            self.toast.emit("error", f"Could not open {report}")
+
+    @pyqtSlot(str)
+    def deleteHistoryJob(self, job_id: str) -> None:
+        try:
+            removed = open_history(self.config).delete(job_id)
+        except HistoryError as exc:
+            self.toast.emit("error", str(exc))
+            return
+        self.toast.emit(
+            "info",
+            f"Removed job {job_id} from the history" if removed else f"Job {job_id} was already gone",
+        )
+        self.refreshHistory(self._history_query)
+
+    @pyqtSlot()
+    def clearHistory(self) -> None:
+        """Delete every index row; the report files on disk stay."""
+        try:
+            removed = open_history(self.config).clear()
+        except HistoryError as exc:
+            self.toast.emit("error", str(exc))
+            return
+        self.toast.emit("info", f"Cleared {removed:,} job record(s) from the history")
+        self.refreshHistory("")
 
     # ------------------------------------------------------------------
     # updates
@@ -1194,7 +1312,7 @@ class Backend(QObject):
             self._runners.remove(runner)
         runner.deleteLater()
 
-    @pyqtSlot("QVariantMap", result=bool)
+    @pyqtSlot("QVariantMap", result=bool)  # type: ignore[arg-type]
     def testSmtp(self, draft: dict[str, Any] | None = None) -> bool:
         """Test the SMTP server, with the values currently in the form.
 

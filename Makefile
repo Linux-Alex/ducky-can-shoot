@@ -7,7 +7,7 @@ RUFF ?= ruff
 PYTHONPATH := src$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 .DEFAULT_GOAL := help
-.PHONY: help run cli test test-gui lint format build deb version install uninstall doctor clean screenshots icons
+.PHONY: help run cli test test-gui lint typecheck format build deb version install uninstall doctor clean screenshots icons
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -27,6 +27,9 @@ test-gui: ## Run only the Qt and QML tests
 
 lint: ## Check the code with ruff (the whole tree, as CI does)
 	$(RUFF) check .
+
+typecheck: ## Type check the package with mypy (as CI does)
+	PYTHONPATH=$(PYTHONPATH) mypy
 
 format: ## Apply the safe ruff fixes
 	$(RUFF) check . --fix

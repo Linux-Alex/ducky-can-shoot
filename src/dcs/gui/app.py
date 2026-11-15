@@ -49,7 +49,9 @@ def build_engine(config: AppConfig | None = None, backend: Backend | None = None
     engine = QQmlApplicationEngine()
     for path in find_qml_imports():
         engine.addImportPath(path)
-    context: QQmlContext = engine.rootContext()
+    context: QQmlContext | None = engine.rootContext()
+    if context is None:  # pragma: no cover - a QML engine always has one
+        raise RuntimeError("the QML engine has no root context")
     context.setContextProperty("backend", backend)
     context.setContextProperty("appVersion", __version__)
     context.setContextProperty("appName", APP_NAME)
@@ -67,7 +69,8 @@ def build_engine(config: AppConfig | None = None, backend: Backend | None = None
     # object yet (headless QML tests); remembering the size is then meaningless.
     application = QGuiApplication.instance()
     if application is not None:
-        remember_window_geometry(application, engine.rootObjects()[0], backend)
+        # the stubs type instance() as a bare QCoreApplication
+        remember_window_geometry(application, engine.rootObjects()[0], backend)  # type: ignore[arg-type]
 
     # Keep both alive for the lifetime of the process.  QML holds the backend
     # only as a context property, so without this reference Python could collect

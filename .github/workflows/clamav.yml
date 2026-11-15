@@ -1,0 +1,46 @@
+name: ClamAV integration
+
+# The unit suite uses the fake clamscan/clamdscan in tests/fakes, which keeps it
+# hermetic.  This workflow is the opposite: a real database, a real scanner, and
+# one test that asserts EICAR is detected.  It runs weekly because that is the
+# only way to notice that the engine front end drifted away from how ClamAV is
+# actually distributed (a renamed flag, a moved socket, a database layout
+# change).
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-clamav:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install ClamAV and the headless runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clamav python3 python3-pytest python3-requests \
+            zip p7zip-full udisks2 util-linux
+
+      - name: Refresh the signature database
+        run: |
+          # the freshclam daemon may already hold the mirror lock on a runner image
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+
+      - name: Say which scanner and database this run used
+        run: |
+          clamscan --version
+          ls -l /var/lib/clamav
+
+      - name: Run the integration test against the real scanner
+        env:
+          PYTHONPATH: src
+          # a missing or unusable ClamAV must fail this workflow, not skip it
+          DCS_CLAMAV_INTEGRATION: "1"
+        run: python3 -m pytest -q -m integration tests/test_integration_clamav.py

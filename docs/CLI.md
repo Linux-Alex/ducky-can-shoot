@@ -81,10 +81,15 @@ Runs the complete job. Either `--device` or `--path` must be given.
 | `--lookup MODE` | `scan.intel.lookup` | `off`, `hash` or `upload` reputation lookups. |
 | `--upload-unknowns` | off | Send unknown files to the provider for analysis. |
 | `--output-dir DIR` | `general.output_dir` | Where the archive is written. |
+| `--encrypt` | `archive.encrypt` | Encrypt the image with 7z AES-256 before anything can be uploaded. Asks for the passphrase on a terminal unless `archive.passphrase_env` or `archive.passphrase_command` provides one. |
+| `--no-encrypt` | off | Do not encrypt, even when `archive.encrypt` is on. |
+| `--passphrase-env NAME` | `archive.passphrase_env` | Environment variable that holds the passphrase. |
+| `--passphrase-command CMD` | `archive.passphrase_command` | Helper command that prints the passphrase. |
 | `--no-archive` | off | Skip the archive stage. |
 | `--no-upload` | off | Never upload anything. |
 | `--no-email` | off | Do not send the email. |
 | `--dry-run-email` | off | Write the message to disk as `.eml` instead of sending it. |
+| `--no-history` | off | Do not record this job in the local history index. |
 | `--yes` | off | Do not ask anything; this is also what allows publishing a non-clean image. |
 | `--json` | off | Print the full `JobResult` as JSON. |
 | `--quiet` | off | Suppress progress output. |
@@ -93,7 +98,14 @@ Runs the complete job. Either `--device` or `--path` must be given.
 dcs run --device /dev/sdb1 --to analyst@example.org
 dcs run --path /mnt/stick --label "Field stick 7" --provider litterbox --yes
 dcs run --path /mnt/stick --no-upload --no-email --json | jq .verdict
+# encrypted image: the passphrase comes from the environment, and it is never
+# written to the config, the report or the log
+DCS_ARCHIVE_PASSPHRASE="$(pass show archive/dcs)" dcs run --path /mnt/stick --encrypt
 ```
+
+Without a passphrase the archive stage fails and nothing is uploaded: an image
+that was meant to be private is never produced readable by accident. The
+recipient has to get the passphrase through a different channel than the link.
 
 Exit code: 0 clean, 1 suspicious or infected, 2 error or cancelled.
 
@@ -276,6 +288,37 @@ a notification without its button is useless for "plug a medium in, click Open".
 `notify-send` is still the fallback on a machine without `gdbus`.
 
 Exit code: 0 normally, 2 for an unknown mode.
+
+### `dcs history [action] [JOBID] [options]`
+
+Browses the local index of finished jobs. The database lives under
+`~/.local/share/dcs/history.db` (configurable), is created mode 0600, and
+never leaves the machine: it holds labels, verdicts, counts, report paths and the
+paths and hashes of findings, not copies of reports.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `action` | `list` | `list`, `show`, `open`, `delete`, `clear`, `prune` or `path`. |
+| `JOBID` | | The job id `list` prints, for `show`, `open` and `delete`. |
+| `--limit N` | `20` | Rows to list. |
+| `--query TEXT` | | Search a label, source path, verdict, job id, archive hash, or the path/hash of a finding. |
+| `--verdict V` | | Only `clean`, `suspicious`, `infected`, `error` or `cancelled`. |
+| `--yes` | off | Do not ask before deleting or clearing. Without it, `clear` asks you to type `clear` (and refuses in a non-interactive shell). |
+| `--json` | off | Print the rows (or one job) as JSON. |
+
+```bash
+dcs history                              # the newest 20 jobs
+dcs history -q invoice.pdf.exe           # which medium had that file?
+dcs history show 4f2c9a1b3d7e           # numbers, report paths, findings
+dcs history open 4f2c9a1b3d7e           # open its stored HTML report
+dcs history delete 4f2c9a1b3d7e --yes   # remove one row (report stays on disk)
+dcs history prune                        # apply history.max_jobs / max_age_days now
+dcs history clear                        # asks you to type "clear"
+```
+
+Retention is applied after every job as well, so `history.max_jobs` and
+`history.max_age_days` bound the index without a cron job. Deleting a row never
+deletes a report file: the index points at reports, it does not own them.
 
 ### `dcs engines [--json]`
 

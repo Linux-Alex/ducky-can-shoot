@@ -310,6 +310,52 @@ Controls.ScrollView {
                         text: "Send the verdict by email"
                         checked: true
                     }
+
+                    Controls.CheckBox {
+                        id: encryptCheck
+                        objectName: "encryptCheck"
+                        text: "Encrypt the image (7z, AES-256)"
+                        checked: backend.settings.archive.encrypt
+                        enabled: archiveCheck.checked
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: encryptCheck.checked && archiveCheck.checked
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.TextField {
+                        id: passphraseField
+                        objectName: "passphraseField"
+                        Layout.fillWidth: true
+                        echoMode: TextInput.Password
+                        placeholderText: backend.encryptionSource !== ""
+                            ? "Optional: leave empty to use " + backend.encryptionSource
+                            : "Passphrase (not saved anywhere)"
+                    }
+
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.7
+                        text: "The image is encrypted with AES-256, file names included, before anything "
+                              + "can be uploaded. The passphrase is never written to the configuration, "
+                              + "the report or the email: send it to the recipient through a different "
+                              + "channel."
+                    }
+
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: passphraseField.text.trim() === "" && backend.encryptionSource === ""
+                        wrapMode: Text.WordWrap
+                        font: Kirigami.Theme.smallFont
+                        color: Kirigami.Theme.negativeTextColor
+                        text: "Type a passphrase, or configure archive.passphrase_env "
+                              + "(DCS_ARCHIVE_PASSPHRASE) or archive.passphrase_command. "
+                              + "Without one the archive stage fails and nothing is uploaded."
+                    }
                 }
 
                 ColumnLayout {
@@ -398,8 +444,12 @@ Controls.ScrollView {
                         wrapMode: Text.WordWrap
                         font: Kirigami.Theme.smallFont
                         color: Kirigami.Theme.neutralTextColor
-                        text: "The uploaded image is reachable by anyone who has the link. "
-                              + "DCS never uploads a suspicious or infected image."
+                        text: encryptCheck.checked
+                              ? "The image is encrypted (AES-256): a link alone does not open it. "
+                                + "DCS never uploads a suspicious or infected image."
+                              : "The uploaded image is reachable by anyone who has the link. "
+                                + "Turn on encryption above to make the download useless without the "
+                                + "passphrase. DCS never uploads a suspicious or infected image."
                     }
                 }
 
@@ -482,6 +532,8 @@ Controls.ScrollView {
                 icon.name: "media-playback-start"
                 highlighted: true
                 enabled: backend.sourcePath !== "" && backend.state !== "running"
+                         && (!encryptCheck.checked || passphraseField.text.trim() !== ""
+                             || backend.encryptionSource !== "")
                 onClicked: {
                     if (uploadCheck.checked && backend.settings.general.confirm_before_upload) {
                         confirmDialog.open();
@@ -510,8 +562,12 @@ Controls.ScrollView {
             "email": emailCheck.checked,
             "recipients": recipientsField.text,
             "dryRun": dryRunCheck.checked,
+            "encrypt": encryptCheck.checked,
+            "passphrase": passphraseField.text,
             "assumeYes": false
         });
+        // the request holds the secret from here on; the field does not need it
+        passphraseField.text = "";
         view.jobStarted();
     }
 
@@ -534,6 +590,10 @@ Controls.ScrollView {
             text += view.willEmail
                 ? "The download link will be emailed. "
                 : "No email will be sent: the link stays in Ducky Can Shoot. ";
+            if (encryptCheck.checked) {
+                return text + "The image is encrypted (AES-256): the passphrase is not in the "
+                              + "email and has to reach the recipient another way.";
+            }
             return text + "Anyone with the link can download it.";
         }
         customFooterActions: [

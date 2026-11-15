@@ -101,6 +101,7 @@ def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
         "gui",
         "watch",
         "updates",
+        "history",
     }
     assert set(data["general"]) == {
         "confirm_before_upload",
@@ -113,6 +114,26 @@ def test_serialised_section_keys_are_exactly_the_documented_ones() -> None:
         "check_on_start",
         "check_interval_hours",
         "enabled",
+    }
+    assert set(data["history"]) == {
+        "enabled",
+        "database",
+        "max_jobs",
+        "max_age_days",
+    }
+    assert set(data["archive"]) == {
+        "compression_level",
+        "enabled",
+        "encrypt",
+        "encrypt_headers",
+        "format",
+        "min_free_space_ratio",
+        "passphrase_command",
+        "passphrase_env",
+        "size_warn_gb",
+        "split_size_mb",
+        "use_device_label",
+        "when",
     }
     assert set(data["gui"]) == {
         "auto_select_new_device",
@@ -433,6 +454,75 @@ def test_save_and_load_config_round_trip(tmp_path: Path) -> None:
     assert loaded == config
     assert loaded.source_path == str(target)
     assert loaded.output_dir == config.output_dir
+
+
+def test_encryption_and_history_survive_a_round_trip_without_the_secret(
+    tmp_path: Path,
+) -> None:
+    """The file may hold where the passphrase comes from, never the passphrase."""
+    config = AppConfig()
+    config.archive.encrypt = True
+    config.archive.encrypt_headers = False
+    config.archive.passphrase_env = "MY_ARCHIVE_PW"
+    config.archive.passphrase_command = "pass show archive/dcs"
+    config.history.enabled = False
+    config.history.max_jobs = 7
+    config.history.max_age_days = 3
+    target = tmp_path / "config.toml"
+
+    config.save(target)
+    text = target.read_text(encoding="utf-8")
+    loaded = load_config(target, system_path=None)
+
+    assert loaded == config
+    assert loaded.archive.encrypt is True
+    assert loaded.archive.encrypt_headers is False
+    assert loaded.archive.passphrase_env == "MY_ARCHIVE_PW"
+    assert loaded.archive.passphrase_command == "pass show archive/dcs"
+    assert loaded.history.max_jobs == 7
+    # there is no key that could hold the secret itself
+    parsed = tomllib.loads(text)
+    assert "passphrase" not in parsed["archive"]
+    assert set(parsed["archive"]) == {
+        "enabled",
+        "format",
+        "compression_level",
+        "split_size_mb",
+        "size_warn_gb",
+        "when",
+        "use_device_label",
+        "min_free_space_ratio",
+        "encrypt",
+        "encrypt_headers",
+        "passphrase_env",
+        "passphrase_command",
+    }
+
+
+def test_boolean_environment_overrides_are_really_booleans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DCS_ARCHIVE_ENCRYPT", "false")
+    assert load_config(system_path=None).archive.encrypt is False
+
+    monkeypatch.setenv("DCS_ARCHIVE_ENCRYPT", "true")
+    assert load_config(system_path=None).archive.encrypt is True
+
+    monkeypatch.setenv("DCS_ARCHIVE_ENCRYPT", "yes")
+    assert load_config(system_path=None).archive.encrypt is True
+
+
+def test_the_archive_passphrase_comes_from_the_named_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig()
+    config.archive.passphrase_env = "DCS_TEST_ARCHIVE_PW"
+    monkeypatch.setenv("DCS_TEST_ARCHIVE_PW", "from-the-environment")
+    assert config.archive_passphrase("") == "from-the-environment"
+    assert config.archive_passphrase("explicit") == "explicit"
+
+    monkeypatch.delenv("DCS_TEST_ARCHIVE_PW")
+    assert config.archive_passphrase("") == ""
 
 
 # ---------------------------------------------------------------------------

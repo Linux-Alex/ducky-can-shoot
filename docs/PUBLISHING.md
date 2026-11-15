@@ -62,6 +62,7 @@ Then:
 
 ```bash
 make test                           # the suite, before anything else
+mypy                                # configured in pyproject.toml, run by CI too
 git diff                            # review what moved
 git commit -am "Ducky Can Shoot 0.2.0"
 git push
@@ -132,7 +133,8 @@ Use `./scripts/bump-version.py` from the second release onwards.
 
 | Workflow | What it does |
 | --- | --- |
-| `.github/workflows/ci.yml` | the whole test suite against the distribution's Qt (including the QML interface), the same suite on Python 3.11 to 3.13 without Qt, and a ruff job |
+| `.github/workflows/ci.yml` | the whole test suite against the distribution's Qt (including the QML interface) **with coverage**, the same suite on Python 3.11 to 3.14 without Qt, a **mypy** job, a **package smoke** job (build the wheel and sdist, install the wheel into a bare virtual environment, run the installed copy) and a pinned **ruff** job |
+| `.github/workflows/clamav.yml` | weekly (and on demand): install a real ClamAV, refresh its signatures and run the `integration` test that asserts EICAR is detected. A missing or unusable ClamAV fails this workflow instead of skipping it |
 | `.github/workflows/release.yml` | on a tag: build, verify the wheel, create the release |
 
 Actions must be allowed once: Settings, Actions, General, "Allow all actions".
@@ -163,7 +165,8 @@ documentation never publishes a file.
 
 - No Flatpak yet. There is a `.deb`, a wheel, an sdist and a self-contained
   AppImage; a Flatpak would need the USB and daemon access worked out first.
-- No translations; the interface is English.
+- No translations yet. They are the 0.4 milestone in `docs/ROADMAP.md`, before
+  the interface grows further.
 - The artefacts carry a build provenance attestation, not a GPG signature: the
   provenance covers "which workflow, which commit", not "signed by a person with
   a key you already trust". A signed `.deb` and a signed AppImage are still open

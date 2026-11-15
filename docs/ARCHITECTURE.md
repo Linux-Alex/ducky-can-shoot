@@ -94,7 +94,8 @@ and even then only through a plain listener callback.
 | `dcs/core/scanner/clamav.py` | ClamAV probing (clamdscan vs clamscan), file-list batches, output parsing. |
 | `dcs/core/scanner/heuristic.py` | The built-in engine: name, hash, magic, PE/ELF/OLE/ZIP/PDF/LNK checks and text indicators. |
 | `dcs/core/scanner/rules.py` | All detection data: extension sets, indicator tables, regexes, thresholds, limits. No logic. |
-| `dcs/core/archiver.py` | Archive creation through `zip`/`7z` with a Python fallback, volume collection, capacity checks. |
+| `dcs/core/archiver.py` | Archive creation through `zip`/`7z` with a Python fallback, volume collection, capacity checks, and AES-256 encryption (the passphrase is fed to 7z over stdin and the produced image is probed before it is accepted). |
+| `dcs/core/history.py` | The local SQLite index of finished jobs: schema and its migrations, recording, search, deletion and retention. It stores report paths and finding rows, never report bodies, and holds no secret. |
 | `dcs/core/upload/base.py` | `UploadProvider` protocol, `BaseProvider`, `UploadResult`, `ProgressReader`. |
 | `dcs/core/upload/registry.py` | `provider_ids()`, `provider_catalog()` and `build_provider()`. |
 | `dcs/core/upload/gofile.py` | The gofile adapter, with store-host caching and fallback hosts. |
@@ -113,7 +114,7 @@ and even then only through a plain listener callback.
 | `dcs/gui/backend.py` | The object QML talks to: models, device polling, job control, settings, desktop integration, the four USB reactions. |
 | `dcs/gui/worker.py` | `PipelineWorker` (runs one job on a thread) and `SignalSink`. |
 | `dcs/gui/watcher.py` | `UsbWatcher`: a QTimer around `dcs.core.watch`, and the "new medium" signal the interface binds to. |
-| `dcs/gui/models.py` | Five list models: devices, stages, findings, log, throughput. |
+| `dcs/gui/models.py` | Six list models: devices, stages, findings, log, throughput, history. |
 | `dcs/gui/app.py` | Qt application setup, QML import paths, window geometry persistence. |
 | `dcs/gui/qml/` | `Main.qml` plus `views/` and `components/`. No logic worth testing. |
 
@@ -438,6 +439,26 @@ When the archive is wanted:
   are ordered `.001, .002, ...`.
 - Finally the primary volume is hashed (SHA-256) for the report.
 
+Encryption (0.3.0) inserts four steps:
+
+- `archive.encrypt` (or `--encrypt`, or the interface checkbox) requires a
+  passphrase. The pipeline resolves it from the request, then the environment
+  variable named by `archive.passphrase_env`, then
+  `archive.passphrase_command`; a job with none fails the stage before anything
+  is written. The configuration file never holds the secret, and the passphrase
+  is dropped as soon as the archiver has it.
+- Encryption forces the 7z format: the extension changes with it, and a missing
+  `7z` binary fails closed instead of falling back to a readable zip.
+- 7z is invoked with `-p` (no value, so it reads the password from stdin) and,
+  by default, `-mhe=on`; the passphrase therefore never appears in
+  `/proc/<pid>/cmdline`.
+- After the volumes exist, `_probe_encryption()` lists the image *without* a
+  password. If the listing succeeds and the members are not marked encrypted, the
+  volumes are deleted and the stage fails: an image that was meant to be private
+  is never left lying around readable. `ArchiveResult` records
+  `encrypted`/`encryption`/`headers_encrypted`, which is what the reports, the
+  email, the JSON and the history row read.
+
 ### 5. upload
 
 Skip rules (`_upload_wanted()`), in order:
@@ -515,6 +536,28 @@ in a `JobRequest`) the message is written as a `.eml` file into `email.dry_run_d
 (or `~/.local/share/dcs/outbox`) and nothing is sent. The stage is marked `done`
 with the difference spelled out, and a delivery failure is a stage failure plus a
 warning, never an exception that would lose the rest of the result.
+
+## The job history
+
+The history is not a stage: it is a side effect of a finished run, written once
+in `Pipeline.run()` after the reports exist and before the summary is emitted
+(`_record_history()`). It runs that late for two reasons:
+
+- the index needs the final report paths, so it cannot run earlier;
+- a broken index must not break a job, so a failure is logged and reported as a
+  live-log warning, never raised;
+- the row is written from `JobResult` alone, which is also why the schema can be
+  read back into a plain dict for the CLI and the `HistoryModel` without either
+  front end importing the other.
+
+The schema (version 1, in `meta`) has two tables: `jobs` (one row per job, with
+the numbers, the archive path and SHA-256, the encryption flag, the share link,
+the report paths and the engine list as JSON) and `findings` (one row per
+finding: path, SHA-256, size, severity, foreign key to the job). The database is
+created mode 0600 under the data directory; `history.enabled` switches recording
+off, and `history.max_jobs`/`history.max_age_days` are applied after every
+write as well as by `dcs history prune`. A future schema version migrates an
+older database in `_migrate()` instead of recreating it.
 
 ## Skip rules at a glance
 

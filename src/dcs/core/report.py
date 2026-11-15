@@ -155,6 +155,17 @@ def _verdict_headline(result: JobResult) -> tuple[str, str, str]:
     return VERDICT_META.get(result.verdict, VERDICT_META[Verdict.ERROR])
 
 
+def _encryption_line(result: JobResult) -> str:
+    """One line about the archive's encryption that never names the passphrase."""
+    archive = result.archive
+    if archive is None or not archive.ok:
+        return "not applicable (no archive)"
+    if not archive.encrypted:
+        return "none - anyone with the file can read it"
+    kind = "AES-256, file names encrypted" if archive.headers_encrypted else "AES-256"
+    return f"{kind}; the passphrase is not in this report"
+
+
 def render_html(result: JobResult, config: ReportConfig | None = None) -> str:
     """Build the self contained HTML report."""
     config = config or ReportConfig()
@@ -294,6 +305,18 @@ def render_html(result: JobResult, config: ReportConfig | None = None) -> str:
             f"({result.archive.ratio:.0%})</td></tr>"
         )
         add(f"<tr><th>Tool</th><td>{_esc(result.archive.tool)}</td></tr>")
+        if result.archive.encrypted:
+            headers = " and its file names" if result.archive.headers_encrypted else ""
+            add(
+                f"<tr><th>Encrypted</th><td>AES-256{_esc(headers)} cannot be read without the "
+                "passphrase. The passphrase is deliberately <strong>not</strong> part of this "
+                "report or of the email: whoever needs the archive has to receive it through "
+                "another channel.</td></tr>"
+            )
+        else:
+            add(
+                "<tr><th>Encrypted</th><td>no - anyone with the archive can read it</td></tr>"
+            )
         if result.archive_sha256:
             add(
                 f"<tr><th>SHA-256</th><td class='path'>{_esc(result.archive_sha256)}</td></tr>"
@@ -404,6 +427,7 @@ def render_text(result: JobResult, config: ReportConfig | None = None) -> str:
         f"Data scanned : {human_bytes(result.bytes_scanned)}",
         f"Findings     : {len(result.findings):,} ({result.threat_count} threatening)",
         f"Archive      : {human_bytes(result.archive_bytes) if result.archive and result.archive.ok else 'not created'}",
+        f"Encryption   : {_encryption_line(result)}",
         f"Share link   : {result.share_link or (result.upload_skipped_reason or 'not available')}",
         "",
         "FINDINGS",

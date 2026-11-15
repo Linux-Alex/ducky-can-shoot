@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <a href="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml"><img src="https://github.com/Linux-Alex/ducky-can-shoot/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/tests-865%20passing-brightgreen" alt="865 tests passing">
+  <img src="https://img.shields.io/badge/tests-910%20passing-brightgreen" alt="910 tests passing">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
   <img src="https://img.shields.io/badge/status-0.2.4%20alpha-orange" alt="Status: 0.2.4 alpha">
@@ -44,12 +44,16 @@ DCS answers both in one run:
    **known-hash intelligence** engine can be switched on as well, see
    [Optional engines](#optional-engines).
 2. It compresses the medium into one zip (or 7z, optionally split into volumes).
-3. It uploads that image to a free host and emails the verdict, the numbers and
+3. It can encrypt that image first (7z AES-256, file names included), so a link
+   to an anonymous host is useless without the passphrase.
+4. It uploads the image to a free host and emails the verdict, the numbers and
    the interesting findings to whoever should know (the HTML report and a CSV of
    the findings are attached).
-4. **Only a clean image is ever published.** An infected medium is scanned,
+5. **Only a clean image is ever published.** An infected medium is scanned,
    reported and emailed, and that is all: no archive, no upload, no link. The
    tool exists so that a suspicious stick cannot become a shared one by accident.
+6. Every finished job is indexed locally, so an earlier result can be searched
+   and reopened without touching the medium again.
 
 Everything runs locally except the upload you asked for.
 
@@ -260,6 +264,8 @@ Exit codes make the result scriptable: **0** clean, **1** suspicious or infected
 | **Built for USB attacks** | Duckyscript/HID payload scripts, autorun.inf launchers, BadUSB tooling, PowerShell encoded commands and download cradles, pipe-into-shell, base64-into-shell, double extensions, Office macros with automatic entry points, OOXML remote templates, PDF JavaScript, packed PE with injection or keylogging APIs, suspicious shortcuts, registry persistence, ransomware precursors, zip bombs, password protected archives, known hashes |
 | **Removable media handling** | lsblk for discovery, udisks2 for mounting without root, or triage any folder instead. The medium is unmounted when the job ends and a "safe to unplug" notification says so; Dolphin gets a **Scan with Ducky Can Shoot** action on any folder and **Open in Ducky Can Shoot** on a device |
 | **Archiving** | zip or 7z, optional volume splitting, free space pre-check, a shared SHA-256 for the image, a Python fallback when the archivers are missing |
+| **Encrypted uploads** | **Encrypt before uploading** (7z AES-256, file names encrypted too). The passphrase comes from an environment variable, a helper command, a prompt or the interface's password field, is never written to the configuration, the report, the email or the log, and is given to the recipient through a different channel. Encryption never relaxes a safety rule: a suspicious or infected image is still refused |
+| **Job history** | A local SQLite index of finished jobs (date, label, verdict, counts, report paths, finding paths and hashes) with search by label, verdict, file name or hash; open a stored report, delete one job, clear the history behind a confirmation, and a visible retention policy. Nothing in it is uploaded or looked up online |
 | **Seven upload hosts** | gofile.io by default (free JSON API, no account), plus litterbox, temp.sh, x0.at, catbox, tmpfiles.org and pixeldrain, behind one adapter interface with streaming uploads, retries and host checksum verification |
 | **Reports** | self contained HTML (with the artwork embedded, so a mailed report keeps it), plain text, findings CSV and machine readable JSON, written atomically |
 | **Email** | HTML and text body with the artwork inline, verdict, numbers, findings, the link when safe, report attached, Bcc supported, and a dry run that writes the message to disk instead of sending it |
@@ -347,13 +353,18 @@ are no longer usable anonymously.
 1. A medium that is not clean is **never** archived and **never** uploaded. The
    verdict and the findings are emailed; that is the whole output.
 2. Publishing a non-clean image additionally requires an explicit confirmation
-   (`--yes` on the command line, a dialog in the interface).
+   (`--yes` on the command line, a dialog in the interface). Encrypting the
+   image changes none of this.
 3. DCS never writes to the medium and never executes anything found on it.
-4. Uploaded files are reachable by anyone who has the link. The interface warns
-   about it, the report says so plainly, and you can keep everything local with
-   `--no-upload`.
+4. An uploaded image is reachable by anyone who has the link - unless it is
+   encrypted, in which case the download is useless without the passphrase. The
+   interface warns when encryption is off, the report says which case applies,
+   and you can keep everything local with `--no-upload`.
 5. Passwords are collected by polkit or sudo, never by DCS, and secrets are read
    from the environment or a helper command instead of the configuration file.
+   The archive passphrase is the strictest case: it is not in the schema at all.
+6. The job history is local-only. It records labels and file paths, so it is
+   created mode 0600 and bounded by a retention policy you can see and change.
 
 **What a clean verdict does not mean.** ClamAV detects signatures, not unknown
 malware; the heuristics detect known attack shapes, not everything. A clean
@@ -372,6 +383,8 @@ dcs doctor                   # is this machine ready? what is missing?
 dcs scan /media/$USER/STICK  # scan only, print the findings
 dcs run --device /dev/sdb1 --to me@example.org          # the whole job
 dcs run --path ./incoming --no-upload --dry-run-email   # nothing leaves the machine
+DCS_ARCHIVE_PASSPHRASE=... dcs run --device /dev/sdb1 --encrypt   # private upload
+dcs history                  # finished jobs: search, open, delete, prune
 dcs install-clamav --dry-run # how ClamAV would be installed here
 dcs config show              # the effective configuration
 dcs config set watch.mode notify   # react when a stick is plugged in (off by default)
@@ -394,6 +407,14 @@ blocking_severity = "high"            # from which severity a medium counts as i
 format = "zip"                        # zip or 7z
 split_size_mb = 0                     # 0 = one file, else volumes of this size
 when = "clean"                        # clean | always | never
+encrypt = true                        # 7z AES-256; the passphrase never lives here
+passphrase_env = "DCS_ARCHIVE_PASSPHRASE"
+# passphrase_command = "pass show archive/dcs"
+
+[history]
+enabled = true                        # local index of finished jobs
+max_jobs = 500                        # 0 = no count limit
+max_age_days = 365                    # 0 = no age limit
 
 [upload]
 provider = "gofile"
@@ -456,7 +477,7 @@ assistance.**
 - Large parts of the code, the tests, the documentation and the interface were
   written by AI agents (DeepSeek Harness sessions) under human direction and
   review, then verified before they were kept.
-- What "verified" means here: 865 automated tests, live upload round trips
+- What "verified" means here: 910 automated tests, live upload round trips
   against real hosts with checksum comparison, scans of a purpose-built sample
   medium with EICAR and synthetic malware shapes, and repeated runs of the
   interface in a real Plasma session. That last one is how several layout and
@@ -490,7 +511,8 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   config.py            configuration, secrets, validation
   device.py            removable media discovery and mounting
   scanner/             engine interface, ClamAV, the built-in heuristics and their rules
-  archiver.py          zip/7z creation with progress and volume splitting
+  archiver.py          zip/7z creation with progress, volume splitting and AES-256 encryption
+  history.py           the local SQLite index of finished jobs
   upload/              provider interface, gofile and the simple hosts
   report.py            HTML, text, CSV and JSON reports
   notify/              SMTP delivery and the message bodies
@@ -498,7 +520,7 @@ src/dcs/core/          headless core: no Qt imports, used by the CLI, the tests 
   installer.py         installing ClamAV through the system package manager
 src/dcs/gui/           PyQt6 facade, Qt models and the QML interface (Kirigami)
 src/dcs/cli.py         the dcs command
-tests/                 865 tests, hermetic: no network, no real device, fake engines
+tests/                 910 tests, hermetic by default: no network, no real device, fake engines
 docs/                  architecture, configuration, CLI, troubleshooting, threat model, roadmap
 bin/dcs                run the checkout without installing
 scripts/               install.sh, uninstall.sh
@@ -510,12 +532,12 @@ packaging/             desktop entry and icon
   including the optional YARA and hash-intelligence engines
 - [docs/CLI.md](docs/CLI.md): the command line reference
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): when something does not work
-- [docs/ROADMAP.md](docs/ROADMAP.md): what 0.2 should contain, and the plan to move the hot paths to Rust or C++
+- [docs/ROADMAP.md](docs/ROADMAP.md): what 0.2.4 provides, the known limitations, the 0.3 milestone (encrypted uploads and job history) and the ideas that are not committed
 
 ## Contributing
 
-Issues and pull requests are welcome. The short version: run `python3 -m pytest`
-and `ruff check src tests` before opening a PR, keep the core free of Qt imports,
+Issues and pull requests are welcome. The short version: run `python3 -m pytest`,
+`ruff check src tests` and `mypy` before opening a PR, keep the core free of Qt imports,
 and give every detection rule the evidence it relies on.
 [CONTRIBUTING.md](CONTRIBUTING.md) has the details, including how to add a
 detection rule, a scan engine or an upload provider.

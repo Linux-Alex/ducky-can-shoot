@@ -395,8 +395,8 @@ class HeuristicEngine:
             )
 
         if "http" in lowered:
-            for match in list(_URL.finditer(text.encode("utf-8", "ignore")))[:5]:
-                url = match.group(0).decode("utf-8", "ignore")
+            for url_match in list(_URL.finditer(text.encode("utf-8", "ignore")))[:5]:
+                url = url_match.group(0).decode("utf-8", "ignore")
                 if rules.C2_URL_PATTERN.match(url):
                     findings.append(
                         self._finding(
