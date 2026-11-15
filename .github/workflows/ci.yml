@@ -135,9 +135,12 @@ jobs:
         run: |
           python -m venv /tmp/dcs-venv
           /tmp/dcs-venv/bin/pip install --quiet --upgrade pip
-          # PyQt6 is a deliberate dependency of the application but not of the
-          # headless commands this job runs, so only requests is installed
-          /tmp/dcs-venv/bin/pip install --quiet requests dist/*.whl
+          # --no-deps on purpose: PyQt6 is a real dependency of the interface,
+          # but the headless commands this job runs must work without it.  A
+          # wheel whose metadata accidentally requires Qt at import time would
+          # fail here, which is exactly the packaging bug this catches.
+          /tmp/dcs-venv/bin/pip install --quiet requests
+          /tmp/dcs-venv/bin/pip install --quiet --no-deps dist/*.whl
 
       - name: The installed copy works and carries its data files
         run: |
@@ -159,8 +162,10 @@ jobs:
 
       - name: The sdist contains the tests and the documentation
         run: |
-          tar tzf dist/*.tar.gz | grep -q "\./tests/test_pipeline.py"
-          tar tzf dist/*.tar.gz | grep -q "\./docs/ROADMAP.md"
+          # hatchling puts everything under <name>-<version>/, so match the tail
+          tar tzf dist/*.tar.gz | grep -q "tests/test_pipeline.py"
+          tar tzf dist/*.tar.gz | grep -q "docs/ROADMAP.md"
+          tar tzf dist/*.tar.gz | grep -q "scripts/release.sh"
 
   lint:
     runs-on: ubuntu-latest

@@ -87,7 +87,7 @@ if [ "$APPIMAGE" = yes ]; then
 fi
 
 say "writing SHA256SUMS"
-( cd dist && sha256sum ./* > SHA256SUMS && cat SHA256SUMS )
+( cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS )
 
 say "artefacts in dist/"
 ls -l dist
