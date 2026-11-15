@@ -173,11 +173,22 @@ jobs:
             dist/*.tar.gz
             dist/*.AppImage
 
-      - name: Create the release
+      # Create or update: re-running this workflow after a failure (or after a
+      # hand-made release of the same tag) must not stop at "release already
+      # exists".  --clobber replaces the assets with the ones this run built, so
+      # the attested files are always the ones on the release.
+      - name: Publish the release (create or update)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "Ducky Can Shoot ${GITHUB_REF_NAME#v}" \
-            --notes-file release-notes.md \
-            dist/*
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "Ducky Can Shoot ${GITHUB_REF_NAME#v}" \
+              --notes-file release-notes.md
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "Ducky Can Shoot ${GITHUB_REF_NAME#v}" \
+              --notes-file release-notes.md \
+              dist/*
+          fi
